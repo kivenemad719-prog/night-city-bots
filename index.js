@@ -11,10 +11,48 @@ const {
   EmbedBuilder,
   ModalBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  SlashCommandBuilder,
+  REST,
+  Routes,
+  AttachmentBuilder
 } = require('discord.js');
 
 require('dotenv').config();
+
+/* =========================
+   IDs - حطهم هنا
+========================= */
+
+const GUILD_ID = 'PUT_GUILD_ID_HERE';
+
+const ADMIN_ROLE_ID = 'PUT_ADMIN_ROLE_ID_HERE';
+const SUPPORT_ROLE_ID = 'PUT_SUPPORT_ROLE_ID_HERE';
+
+const WELCOME_CHANNEL_ID = 'PUT_WELCOME_CHANNEL_ID_HERE';
+const RULES_CHANNEL_ID = 'PUT_RULES_CHANNEL_ID_HERE';
+const TICKETS_PANEL_CHANNEL_ID = 'PUT_TICKETS_PANEL_CHANNEL_ID_HERE';
+const DECISION_CHANNEL_ID = 'PUT_DECISION_CHANNEL_ID_HERE';
+const LOG_CHANNEL_ID = 'PUT_LOG_CHANNEL_ID_HERE';
+
+const CATEGORY_SUPPORT_ID = 'PUT_CATEGORY_SUPPORT_ID_HERE';
+const CATEGORY_REPORTS_ID = 'PUT_CATEGORY_REPORTS_ID_HERE';
+const CATEGORY_QUESTIONS_ID = 'PUT_CATEGORY_QUESTIONS_ID_HERE';
+const CATEGORY_SUGGESTIONS_ID = 'PUT_CATEGORY_SUGGESTIONS_ID_HERE';
+const CATEGORY_PARTNERSHIP_ID = 'PUT_CATEGORY_PARTNERSHIP_ID_HERE';
+
+/* =========================
+   إعدادات البوت
+========================= */
+
+const CLIENT_ID = 'PUT_CLIENT_ID_HERE'; // ايدي البوت نفسه
+
+const BOT_NAME = 'Night City Community';
+const BOT_FOOTER = 'Night City Community System';
+
+/* =========================
+   Client
+========================= */
 
 const client = new Client({
   intents: [
@@ -28,255 +66,411 @@ const client = new Client({
 });
 
 /* =========================
-   إعدادات التذاكر
+   أنواع التذاكر
 ========================= */
+
 const TICKET_TYPES = {
   ticket_support: {
     label: 'دعم فني',
     emoji: '🎫',
-    categoryId: process.env.CATEGORY_SUPPORT_ID,
+    categoryId: CATEGORY_SUPPORT_ID,
     prefix: 'support',
     color: 0x5865F2
   },
   ticket_report: {
-    label: 'إبلاغ على عضو',
+    label: 'إبلاغ',
     emoji: '🚨',
-    categoryId: process.env.CATEGORY_REPORTS_ID,
+    categoryId: CATEGORY_REPORTS_ID,
     prefix: 'report',
     color: 0xED4245
   },
   ticket_question: {
     label: 'استفسار',
     emoji: '❓',
-    categoryId: process.env.CATEGORY_QUESTIONS_ID,
+    categoryId: CATEGORY_QUESTIONS_ID,
     prefix: 'question',
     color: 0xFEE75C
   },
   ticket_suggestion: {
     label: 'اقتراح',
     emoji: '💡',
-    categoryId: process.env.CATEGORY_SUGGESTIONS_ID,
+    categoryId: CATEGORY_SUGGESTIONS_ID,
     prefix: 'suggestion',
     color: 0x57F287
   },
   ticket_partnership: {
     label: 'شراكة',
     emoji: '🤝',
-    categoryId: process.env.CATEGORY_PARTNERSHIP_ID,
+    categoryId: CATEGORY_PARTNERSHIP_ID,
     prefix: 'partner',
     color: 0xEB459E
   }
 };
 
 /* =========================
-   مساعدات
+   تخزين مؤقت بسيط
 ========================= */
+
+const claimedTickets = new Map();
+
+/* =========================
+   Helpers
+========================= */
+
 function sanitizeName(name) {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]/g, '')
-    .slice(0, 10) || 'user';
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]/g, '')
+      .slice(0, 12) || 'user'
+  );
 }
 
-async function fetchChannel(id) {
+async function fetchChannel(channelId) {
   try {
-    return await client.channels.fetch(id);
+    return await client.channels.fetch(channelId);
   } catch {
     return null;
   }
 }
 
 async function sendLog(content) {
-  const logChannel = await fetchChannel(process.env.LOG_CHANNEL_ID);
+  const logChannel = await fetchChannel(LOG_CHANNEL_ID);
   if (!logChannel) return;
   await logChannel.send({ content }).catch(() => {});
 }
 
-function hasAdmin(member) {
-  return member.roles.cache.has(process.env.ADMIN_ROLE_ID);
+function isAdmin(member) {
+  return member?.roles?.cache?.has(ADMIN_ROLE_ID);
 }
 
-function hasSupport(member) {
-  return member.roles.cache.has(process.env.SUPPORT_ROLE_ID);
+function isSupport(member) {
+  return member?.roles?.cache?.has(SUPPORT_ROLE_ID);
 }
 
-async function panelAlreadyExists(channel, titleText) {
+function isStaff(member) {
+  return isAdmin(member) || isSupport(member);
+}
+
+function buildRulesButtonRow(guildId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setLabel('📜 الدخول إلى القوانين')
+      .setStyle(ButtonStyle.Link)
+      .setURL(`https://discord.com/channels/${guildId}/${RULES_CHANNEL_ID}`)
+  );
+}
+
+function buildWelcomeEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x2B2D31)
+    .setTitle(`👋 مرحبًا بك في ${BOT_NAME}`)
+    .setDescription(
+      `مرحبًا بك في سيرفر **${BOT_NAME}** 🌆\n\n` +
+      `نتمنى لك وقتًا ممتعًا معنا.\n` +
+      `يرجى قراءة القوانين أولًا قبل التفاعل داخل السيرفر.`
+    )
+    .setFooter({ text: BOT_FOOTER });
+}
+
+function buildTicketsPanelEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle('🎫 نظام التذاكر')
+    .setDescription(
+      `اختر نوع التذكرة المناسب من الأزرار بالأسفل.\n\n` +
+      `كل نوع تذكرة يفتح في **كاتيجوري مختلفة** تلقائيًا.\n` +
+      `يرجى اختيار القسم الصحيح لتسهيل الرد عليك بسرعة.`
+    )
+    .setFooter({ text: BOT_FOOTER });
+}
+
+function buildTicketsPanelRows() {
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('ticket_support')
+      .setLabel('دعم فني')
+      .setEmoji('🎫')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('ticket_report')
+      .setLabel('إبلاغ')
+      .setEmoji('🚨')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId('ticket_question')
+      .setLabel('استفسار')
+      .setEmoji('❓')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('ticket_suggestion')
+      .setLabel('اقتراح')
+      .setEmoji('💡')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId('ticket_partnership')
+      .setLabel('شراكة')
+      .setEmoji('🤝')
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  return [row1, row2];
+}
+
+function buildDecisionPanelEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x2B2D31)
+    .setTitle('📢 قرارات الإدارة')
+    .setDescription(
+      `هذا القسم مخصص للإدارة لإرسال الرسائل إلى جميع أعضاء السيرفر.\n\n` +
+      `عند الضغط على الزر، ستكتب الرسالة مرة واحدة،` +
+      ` ثم يقوم البوت بإرسالها **لكل الأعضاء** في الخاص،` +
+      ` مع كتابة اسم كل عضو داخل رسالته تلقائيًا.`
+    )
+    .setFooter({ text: BOT_FOOTER });
+}
+
+function buildDecisionPanelRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('open_decision_modal')
+      .setLabel('📝 كتابة قرار / إرسال رسالة')
+      .setStyle(ButtonStyle.Primary)
+  );
+}
+
+function buildTicketButtons() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('claim_ticket')
+        .setLabel('استلام التذكرة')
+        .setEmoji('📌')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('transcript_ticket')
+        .setLabel('نسخ المحادثة')
+        .setEmoji('🧾')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('close_ticket')
+        .setLabel('إغلاق التذكرة')
+        .setEmoji('🔒')
+        .setStyle(ButtonStyle.Danger)
+    )
+  ];
+}
+
+async function panelExists(channel, title) {
   try {
-    const messages = await channel.messages.fetch({ limit: 20 });
-    return messages.some((msg) =>
-      msg.author.id === client.user.id &&
-      msg.embeds.length > 0 &&
-      msg.embeds[0].title === titleText
+    const messages = await channel.messages.fetch({ limit: 25 });
+    return messages.some(
+      (m) =>
+        m.author.id === client.user.id &&
+        m.embeds.length > 0 &&
+        m.embeds[0].title === title
     );
   } catch {
     return false;
   }
 }
 
+function parseTicketTopic(topic) {
+  if (!topic) return {};
+  const ownerMatch = topic.match(/OWNER:(\d+)/);
+  const typeMatch = topic.match(/TYPE:([a-z_]+)/);
+  return {
+    ownerId: ownerMatch ? ownerMatch[1] : null,
+    ticketType: typeMatch ? typeMatch[1] : null
+  };
+}
+
+async function createTranscript(channel) {
+  const fetched = await channel.messages.fetch({ limit: 100 });
+  const messages = [...fetched.values()].reverse();
+
+  let content = `Transcript for #${channel.name}\n\n`;
+
+  for (const msg of messages) {
+    const date = new Date(msg.createdTimestamp).toLocaleString('en-US');
+    const line = `[${date}] ${msg.author.tag}: ${msg.content || '[embed/attachment]'}\n`;
+    content += line;
+  }
+
+  return Buffer.from(content, 'utf-8');
+}
+
+async function sendWelcomePanel() {
+  const welcomeChannel = await fetchChannel(WELCOME_CHANNEL_ID);
+  if (!welcomeChannel) return;
+
+  const exists = await panelExists(welcomeChannel, `👋 مرحبًا بك في ${BOT_NAME}`);
+  if (exists) return;
+
+  await welcomeChannel.send({
+    embeds: [buildWelcomeEmbed()],
+    components: [buildRulesButtonRow(GUILD_ID)]
+  }).catch(() => {});
+}
+
+async function sendTicketsPanel() {
+  const ticketsChannel = await fetchChannel(TICKETS_PANEL_CHANNEL_ID);
+  if (!ticketsChannel) return;
+
+  const exists = await panelExists(ticketsChannel, '🎫 نظام التذاكر');
+  if (exists) return;
+
+  await ticketsChannel.send({
+    embeds: [buildTicketsPanelEmbed()],
+    components: buildTicketsPanelRows()
+  }).catch(() => {});
+}
+
+async function sendDecisionPanel() {
+  const decisionChannel = await fetchChannel(DECISION_CHANNEL_ID);
+  if (!decisionChannel) return;
+
+  const exists = await panelExists(decisionChannel, '📢 قرارات الإدارة');
+  if (exists) return;
+
+  await decisionChannel.send({
+    embeds: [buildDecisionPanelEmbed()],
+    components: [buildDecisionPanelRow()]
+  }).catch(() => {});
+}
+
+async function registerSlashCommands() {
+  const commands = [
+    new SlashCommandBuilder()
+      .setName('setup')
+      .setDescription('إرسال كل اللوحات')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator),
+
+    new SlashCommandBuilder()
+      .setName('panel-welcome')
+      .setDescription('إرسال لوحة الترحيب')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator),
+
+    new SlashCommandBuilder()
+      .setName('panel-tickets')
+      .setDescription('إرسال لوحة التذاكر')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator),
+
+    new SlashCommandBuilder()
+      .setName('panel-decisions')
+      .setDescription('إرسال لوحة قرارات الإدارة')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator)
+  ].map((cmd) => cmd.toJSON());
+
+  const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+
+  try {
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      { body: commands }
+    );
+    console.log('✅ Slash commands registered');
+  } catch (error) {
+    console.error('❌ Slash command registration error:', error);
+  }
+}
+
 /* =========================
-   عند التشغيل
+   Ready
 ========================= */
+
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  const welcomeChannel = await fetchChannel(process.env.WELCOME_CHANNEL_ID);
-  const ticketsPanelChannel = await fetchChannel(process.env.TICKETS_PANEL_CHANNEL_ID);
-  const decisionChannel = await fetchChannel(process.env.DECISION_CHANNEL_ID);
+  await registerSlashCommands();
+  await sendWelcomePanel();
+  await sendTicketsPanel();
+  await sendDecisionPanel();
 
-  /* ===== بانل الترحيب ===== */
-  if (welcomeChannel) {
-    const exists = await panelAlreadyExists(welcomeChannel, '👋 مرحبًا بك في Night City Community');
-
-    if (!exists) {
-      const rulesRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setLabel('📜 الدخول إلى القوانين')
-          .setStyle(ButtonStyle.Link)
-          .setURL(`https://discord.com/channels/${process.env.GUILD_ID}/${process.env.RULES_CHANNEL_ID}`)
-      );
-
-      const welcomeEmbed = new EmbedBuilder()
-        .setColor(0x2B2D31)
-        .setTitle('👋 مرحبًا بك في Night City Community')
-        .setDescription(
-          `مرحبًا بك في سيرفر **Night City Community** 🌆\n\n` +
-          `نرحب بك في مجتمعنا ونتمنى لك وقتًا ممتعًا معنا.\n` +
-          `فضلاً اقرأ القوانين أولًا قبل المشاركة داخل السيرفر.`
-        )
-        .setFooter({ text: 'Night City Community' });
-
-      await welcomeChannel.send({
-        embeds: [welcomeEmbed],
-        components: [rulesRow]
-      }).catch(() => {});
-    }
-  }
-
-  /* ===== بانل التذاكر ===== */
-  if (ticketsPanelChannel) {
-    const exists = await panelAlreadyExists(ticketsPanelChannel, '🎫 نظام التذاكر');
-
-    if (!exists) {
-      const ticketEmbed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle('🎫 نظام التذاكر')
-        .setDescription(
-          `اختر نوع التذكرة المناسب من الأزرار بالأسفل.\n\n` +
-          `كل نوع تذكرة يفتح في **كاتيجوري مختلفة** تلقائيًا.\n` +
-          `يرجى اختيار القسم الصحيح لتسهيل الرد عليك بسرعة.`
-        )
-        .setFooter({ text: 'Night City Community Tickets' });
-
-      const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('ticket_support')
-          .setLabel('دعم فني')
-          .setEmoji('🎫')
-          .setStyle(ButtonStyle.Primary),
-
-        new ButtonBuilder()
-          .setCustomId('ticket_report')
-          .setLabel('إبلاغ')
-          .setEmoji('🚨')
-          .setStyle(ButtonStyle.Danger),
-
-        new ButtonBuilder()
-          .setCustomId('ticket_question')
-          .setLabel('استفسار')
-          .setEmoji('❓')
-          .setStyle(ButtonStyle.Secondary)
-      );
-
-      const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('ticket_suggestion')
-          .setLabel('اقتراح')
-          .setEmoji('💡')
-          .setStyle(ButtonStyle.Success),
-
-        new ButtonBuilder()
-          .setCustomId('ticket_partnership')
-          .setLabel('شراكة')
-          .setEmoji('🤝')
-          .setStyle(ButtonStyle.Primary)
-      );
-
-      await ticketsPanelChannel.send({
-        embeds: [ticketEmbed],
-        components: [row1, row2]
-      }).catch(() => {});
-    }
-  }
-
-  /* ===== بانل قرارات الإدارة ===== */
-  if (decisionChannel) {
-    const exists = await panelAlreadyExists(decisionChannel, '📢 قرارات الإدارة');
-
-    if (!exists) {
-      const decisionEmbed = new EmbedBuilder()
-        .setColor(0x2B2D31)
-        .setTitle('📢 قرارات الإدارة')
-        .setDescription(
-          `هذا القسم مخصص للإدارة لإرسال الرسائل إلى جميع أعضاء السيرفر.\n\n` +
-          `عند الضغط على الزر، ستكتب الرسالة مرة واحدة،` +
-          ` ثم يقوم البوت بإرسالها **لكل الأعضاء** في الخاص،` +
-          ` مع كتابة اسم كل عضو داخل رسالته تلقائيًا.`
-        )
-        .setFooter({ text: 'Night City Community Administration' });
-
-      const decisionRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('open_decision_modal')
-          .setLabel('📝 كتابة قرار / إرسال رسالة')
-          .setStyle(ButtonStyle.Primary)
-      );
-
-      await decisionChannel.send({
-        embeds: [decisionEmbed],
-        components: [decisionRow]
-      }).catch(() => {});
-    }
-  }
-
-  await sendLog('✅ تم تشغيل البوت والتأكد من البانلات الرئيسية.');
+  await sendLog('✅ تم تشغيل البوت وإرسال/التحقق من كل اللوحات.');
 });
 
 /* =========================
-   رسالة ترحيب للأعضاء الجدد
+   عضو جديد
 ========================= */
-client.on(Events.GuildMemberAdd, async (member) => {
-  const welcomeChannel = await fetchChannel(process.env.WELCOME_CHANNEL_ID);
-  if (!welcomeChannel) return;
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setLabel('📜 قراءة القوانين')
-      .setStyle(ButtonStyle.Link)
-      .setURL(`https://discord.com/channels/${member.guild.id}/${process.env.RULES_CHANNEL_ID}`)
-  );
+client.on(Events.GuildMemberAdd, async (member) => {
+  const welcomeChannel = await fetchChannel(WELCOME_CHANNEL_ID);
+  if (!welcomeChannel) return;
 
   const embed = new EmbedBuilder()
     .setColor(0x57F287)
     .setTitle('✨ عضو جديد')
     .setDescription(
-      `مرحبًا بك ${member} في **Night City Community** 🌆\n\n` +
+      `مرحبًا بك ${member} في **${BOT_NAME}** 🌆\n\n` +
       `يسعدنا انضمامك إلينا.\n` +
       `يرجى قراءة القوانين أولًا ثم استمتع بوقتك معنا 💙`
     )
-    .setFooter({ text: 'Welcome to Night City Community' });
+    .setFooter({ text: BOT_FOOTER });
 
   await welcomeChannel.send({
     embeds: [embed],
-    components: [row]
+    components: [buildRulesButtonRow(member.guild.id)]
   }).catch(() => {});
 });
 
 /* =========================
-   التفاعلات
+   Slash Commands
 ========================= */
+
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
-    /* ===== فتح تذكرة ===== */
+    if (interaction.isChatInputCommand()) {
+      if (!isAdmin(interaction.member)) {
+        return interaction.reply({
+          content: '❌ هذا الأمر للإدارة فقط.',
+          ephemeral: true
+        });
+      }
+
+      if (interaction.commandName === 'setup') {
+        await sendWelcomePanel();
+        await sendTicketsPanel();
+        await sendDecisionPanel();
+
+        return interaction.reply({
+          content: '✅ تم إرسال كل اللوحات أو التحقق من وجودها.',
+          ephemeral: true
+        });
+      }
+
+      if (interaction.commandName === 'panel-welcome') {
+        await sendWelcomePanel();
+        return interaction.reply({
+          content: '✅ تم إرسال لوحة الترحيب أو كانت موجودة بالفعل.',
+          ephemeral: true
+        });
+      }
+
+      if (interaction.commandName === 'panel-tickets') {
+        await sendTicketsPanel();
+        return interaction.reply({
+          content: '✅ تم إرسال لوحة التذاكر أو كانت موجودة بالفعل.',
+          ephemeral: true
+        });
+      }
+
+      if (interaction.commandName === 'panel-decisions') {
+        await sendDecisionPanel();
+        return interaction.reply({
+          content: '✅ تم إرسال لوحة القرارات أو كانت موجودة بالفعل.',
+          ephemeral: true
+        });
+      }
+    }
+
+    /* =========================
+       أزرار التذاكر
+    ========================= */
+
     if (interaction.isButton() && TICKET_TYPES[interaction.customId]) {
       const ticketInfo = TICKET_TYPES[interaction.customId];
       const guild = interaction.guild;
@@ -296,6 +490,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
           ephemeral: true
         });
       }
+
+      await interaction.deferReply({ ephemeral: true });
 
       const channelName = `${ticketInfo.prefix}-${sanitizeName(interaction.user.username)}`;
 
@@ -318,7 +514,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             ]
           },
           {
-            id: process.env.ADMIN_ROLE_ID,
+            id: ADMIN_ROLE_ID,
             allow: [
               PermissionsBitField.Flags.ViewChannel,
               PermissionsBitField.Flags.SendMessages,
@@ -327,7 +523,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             ]
           },
           {
-            id: process.env.SUPPORT_ROLE_ID,
+            id: SUPPORT_ROLE_ID,
             allow: [
               PermissionsBitField.Flags.ViewChannel,
               PermissionsBitField.Flags.SendMessages,
@@ -336,14 +532,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
         ]
       });
-
-      const closeRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('close_ticket')
-          .setLabel('إغلاق التذكرة')
-          .setEmoji('🔒')
-          .setStyle(ButtonStyle.Danger)
-      );
 
       const ticketEmbed = new EmbedBuilder()
         .setColor(ticketInfo.color)
@@ -357,12 +545,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           { name: 'نوع التذكرة', value: ticketInfo.label, inline: true },
           { name: 'صاحب التذكرة', value: interaction.user.tag, inline: true }
         )
-        .setFooter({ text: 'Night City Community Ticket System' });
+        .setFooter({ text: BOT_FOOTER });
 
       await ticketChannel.send({
-        content: `${interaction.user} <@&${process.env.SUPPORT_ROLE_ID}>`,
+        content: `${interaction.user} <@&${SUPPORT_ROLE_ID}>`,
         embeds: [ticketEmbed],
-        components: [closeRow]
+        components: buildTicketButtons()
       });
 
       await sendLog(
@@ -372,24 +560,99 @@ client.on(Events.InteractionCreate, async (interaction) => {
         `القناة: ${ticketChannel}`
       );
 
-      return interaction.reply({
-        content: `✅ تم فتح التذكرة بنجاح: ${ticketChannel}`,
-        ephemeral: true
+      return interaction.editReply({
+        content: `✅ تم فتح التذكرة بنجاح: ${ticketChannel}`
       });
     }
 
-    /* ===== إغلاق التذكرة ===== */
+    /* =========================
+       استلام التذكرة
+    ========================= */
+
+    if (interaction.isButton() && interaction.customId === 'claim_ticket') {
+      if (!isStaff(interaction.member)) {
+        return interaction.reply({
+          content: '❌ فقط الإدارة أو الدعم يمكنهم استلام التذكرة.',
+          ephemeral: true
+        });
+      }
+
+      const claimedBy = claimedTickets.get(interaction.channel.id);
+      if (claimedBy) {
+        return interaction.reply({
+          content: `❌ هذه التذكرة مستلمة بالفعل بواسطة <@${claimedBy}>`,
+          ephemeral: true
+        });
+      }
+
+      claimedTickets.set(interaction.channel.id, interaction.user.id);
+
+      await interaction.reply({
+        content: `📌 تم استلام التذكرة بواسطة ${interaction.user}`,
+        ephemeral: false
+      });
+
+      await sendLog(
+        `📌 تم استلام تذكرة\n` +
+        `القناة: ${interaction.channel.name}\n` +
+        `بواسطة: ${interaction.user.tag}`
+      );
+
+      return;
+    }
+
+    /* =========================
+       Transcript
+    ========================= */
+
+    if (interaction.isButton() && interaction.customId === 'transcript_ticket') {
+      if (!isStaff(interaction.member)) {
+        return interaction.reply({
+          content: '❌ فقط الإدارة أو الدعم يمكنهم نسخ المحادثة.',
+          ephemeral: true
+        });
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+
+      const buffer = await createTranscript(interaction.channel);
+      const file = new AttachmentBuilder(buffer, {
+        name: `${interaction.channel.name}-transcript.txt`
+      });
+
+      await interaction.editReply({
+        content: '✅ تم إنشاء نسخة من المحادثة.',
+        files: [file]
+      });
+
+      await sendLog(
+        `🧾 تم إنشاء Transcript\n` +
+        `القناة: ${interaction.channel.name}\n` +
+        `بواسطة: ${interaction.user.tag}`
+      );
+
+      return;
+    }
+
+    /* =========================
+       إغلاق التذكرة
+    ========================= */
+
     if (interaction.isButton() && interaction.customId === 'close_ticket') {
-      if (!hasAdmin(interaction.member) && !hasSupport(interaction.member)) {
+      if (!isStaff(interaction.member)) {
         return interaction.reply({
           content: '❌ فقط الإدارة أو الدعم يمكنهم إغلاق التذكرة.',
           ephemeral: true
         });
       }
 
+      const parsed = parseTicketTopic(interaction.channel.topic);
+      const ownerMention = parsed.ownerId ? `<@${parsed.ownerId}>` : 'غير معروف';
+
       await sendLog(
         `🔒 تم إغلاق تذكرة\n` +
         `القناة: ${interaction.channel.name}\n` +
+        `المالك: ${ownerMention}\n` +
         `بواسطة: ${interaction.user.tag}`
       );
 
@@ -398,22 +661,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
 
       setTimeout(async () => {
+        claimedTickets.delete(interaction.channel.id);
         await interaction.channel.delete().catch(() => {});
       }, 5000);
 
       return;
     }
 
-    /* ===== فتح مودال قرارات الإدارة ===== */
+    /* =========================
+       قرارات الإدارة
+    ========================= */
+
     if (interaction.isButton() && interaction.customId === 'open_decision_modal') {
-      if (!hasAdmin(interaction.member)) {
+      if (!isAdmin(interaction.member)) {
         return interaction.reply({
           content: '❌ هذا الزر خاص بالإدارة فقط.',
           ephemeral: true
         });
       }
 
-      if (interaction.channel.id !== process.env.DECISION_CHANNEL_ID) {
+      if (interaction.channel.id !== DECISION_CHANNEL_ID) {
         return interaction.reply({
           content: '❌ استخدم هذا الزر داخل قناة قرارات الإدارة فقط.',
           ephemeral: true
@@ -437,9 +704,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.showModal(modal);
     }
 
-    /* ===== إرسال الرسالة لكل الأعضاء ===== */
+    /* =========================
+       إرسال قرار للجميع
+    ========================= */
+
     if (interaction.isModalSubmit() && interaction.customId === 'decision_modal') {
-      if (!hasAdmin(interaction.member)) {
+      if (!isAdmin(interaction.member)) {
         return interaction.reply({
           content: '❌ هذا الإجراء خاص بالإدارة فقط.',
           ephemeral: true
@@ -464,14 +734,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
         try {
           const dmEmbed = new EmbedBuilder()
             .setColor(0x2B2D31)
-            .setTitle('📢 رسالة من إدارة Night City Community')
+            .setTitle(`📢 رسالة من إدارة ${BOT_NAME}`)
             .setDescription(
               `👋 أهلاً يا **${member.user.username}**\n\n` +
               `${messageValue}\n\n` +
               `━━━━━━━━━━━━━━━\n` +
               `💬 تم إرسال هذه الرسالة لك من إدارة السيرفر.`
             )
-            .setFooter({ text: 'Night City Community Administration' });
+            .setFooter({ text: BOT_FOOTER });
 
           await member.send({ embeds: [dmEmbed] });
           success++;
@@ -500,6 +770,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.reply({
         content: '❌ حدث خطأ أثناء تنفيذ العملية.',
         ephemeral: true
+      }).catch(() => {});
+    } else if (interaction.isRepliable() && interaction.deferred && !interaction.replied) {
+      await interaction.editReply({
+        content: '❌ حدث خطأ أثناء تنفيذ العملية.'
       }).catch(() => {});
     }
   }
