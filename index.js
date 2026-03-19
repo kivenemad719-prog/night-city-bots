@@ -111,6 +111,7 @@ const TICKET_TYPES = {
 ========================= */
 
 const claimedTickets = new Map();
+let ticketCounter = 1;
 
 /* =========================
    Helpers
@@ -279,9 +280,12 @@ function parseTicketTopic(topic) {
   if (!topic) return {};
   const ownerMatch = topic.match(/OWNER:(\d+)/);
   const typeMatch = topic.match(/TYPE:([a-z_]+)/);
+  const idMatch = topic.match(/ID:(\d+)/);
+
   return {
     ownerId: ownerMatch ? ownerMatch[1] : null,
-    ticketType: typeMatch ? typeMatch[1] : null
+    ticketType: typeMatch ? typeMatch[1] : null,
+    ticketId: idMatch ? idMatch[1] : null
   };
 }
 
@@ -488,13 +492,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.deferReply({ ephemeral: true });
 
-      const channelName = `${ticketInfo.prefix}-${sanitizeName(interaction.user.username)}`;
+      const ticketId = ticketCounter++;
+      const channelName = `${ticketInfo.prefix}-${ticketId}`;
 
       const ticketChannel = await guild.channels.create({
         name: channelName,
         type: ChannelType.GuildText,
         parent: ticketInfo.categoryId,
-        topic: `OWNER:${interaction.user.id} | TYPE:${interaction.customId}`,
+        topic: `OWNER:${interaction.user.id} | TYPE:${interaction.customId} | ID:${ticketId}`,
         permissionOverwrites: [
           {
             id: guild.id,
@@ -540,13 +545,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const ticketEmbed = new EmbedBuilder()
         .setColor(ticketInfo.color)
-        .setTitle(`${ticketInfo.emoji} ${ticketInfo.label}`)
+        .setTitle(`${ticketInfo.emoji} ${ticketInfo.label} #${ticketId}`)
         .setDescription(
           `مرحبًا ${interaction.user}\n\n` +
           `تم فتح تذكرتك بنجاح.\n` +
           `يرجى كتابة التفاصيل بوضوح وسيتم الرد عليك بأقرب وقت.`
         )
         .addFields(
+          { name: 'رقم التذكرة', value: `#${ticketId}`, inline: true },
           { name: 'نوع التذكرة', value: ticketInfo.label, inline: true },
           { name: 'صاحب التذكرة', value: interaction.user.tag, inline: true }
         )
@@ -568,6 +574,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await sendLog(
         `📂 تم فتح تذكرة جديدة\n` +
+        `رقم التذكرة: #${ticketId}\n` +
         `العضو: ${interaction.user.tag}\n` +
         `النوع: ${ticketInfo.label}\n` +
         `القناة: ${ticketChannel}`
@@ -641,7 +648,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    /* ===== إغلاق التذكرة ===== */
+    /* ===== زر إغلاق التذكرة ===== */
     if (interaction.isButton() && interaction.customId === 'close_ticket') {
       if (!isStaff(interaction.member)) {
         return interaction.reply({
@@ -650,14 +657,64 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
       }
 
+      const modal = new ModalBuilder()
+        .setCustomId('close_ticket_modal')
+        .setTitle('إغلاق التذكرة');
+
+      const reasonInput = new TextInputBuilder()
+        .setCustomId('close_reason')
+        .setLabel('اكتب سبب إغلاق التذكرة')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(reasonInput)
+      );
+
+      return interaction.showModal(modal);
+    }
+
+    /* ===== مودال إغلاق التذكرة ===== */
+    if (interaction.isModalSubmit() && interaction.customId === 'close_ticket_modal') {
+      if (!isStaff(interaction.member)) {
+        return interaction.reply({
+          content: '❌ هذا الإجراء خاص بالإدارة أو الدعم.',
+          ephemeral: true
+        });
+      }
+
+      const reason = interaction.fields.getTextInputValue('close_reason').trim();
       const parsed = parseTicketTopic(interaction.channel.topic);
-      const ownerMention = parsed.ownerId ? `<@${parsed.ownerId}>` : 'غير معروف';
+
+      const ownerId = parsed.ownerId;
+      const ticketId = parsed.ticketId || 'غير معروف';
+      const ticketType = parsed.ticketType || 'غير معروف';
+
+      try {
+        const user = await client.users.fetch(ownerId);
+
+        const dmEmbed = new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle('🔒 تم إغلاق تذكرتك')
+          .setDescription(
+            `تم إغلاق تذكرتك في سيرفر **${BOT_NAME}**\n\n` +
+            `🎫 رقم التذكرة: **#${ticketId}**\n` +
+            `📂 نوع التذكرة: **${ticketType}**\n\n` +
+            `📄 السبب:\n${reason}`
+          )
+          .setFooter({ text: BOT_FOOTER });
+
+        await user.send({ embeds: [dmEmbed] });
+      } catch (err) {
+        console.log('❌ Failed to send close reason DM');
+      }
 
       await sendLog(
         `🔒 تم إغلاق تذكرة\n` +
+        `رقم التذكرة: #${ticketId}\n` +
         `القناة: ${interaction.channel.name}\n` +
-        `المالك: ${ownerMention}\n` +
-        `بواسطة: ${interaction.user.tag}`
+        `بواسطة: ${interaction.user.tag}\n` +
+        `السبب: ${reason}`
       );
 
       await interaction.reply({
