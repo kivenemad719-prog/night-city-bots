@@ -28,6 +28,7 @@ const GUILD_ID = '1482955089391124583';
 
 const ADMIN_ROLE_ID = '1484040156318138390';
 const SUPPORT_ROLE_ID = '1484040249788207175';
+const PLAYER_ROLE_ID = '1484231061524189225';
 
 const WELCOME_CHANNEL_ID = '1484024608486326312';
 const RULES_CHANNEL_ID = '1484026706053431316';
@@ -400,6 +401,15 @@ client.once(Events.ClientReady, async () => {
 
 client.on(Events.GuildMemberAdd, async (member) => {
   const welcomeChannel = await fetchChannel(WELCOME_CHANNEL_ID);
+
+  // 🎭 إعطاء رول Player
+  try {
+    await member.roles.add(PLAYER_ROLE_ID);
+  } catch (err) {
+    console.log('❌ فشل إعطاء رول Player');
+  }
+
+  // 👋 رسالة ترحيب
   if (!welcomeChannel) return;
 
   const embed = new EmbedBuilder()
@@ -407,7 +417,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
     .setTitle('✨ عضو جديد')
     .setDescription(
       `مرحبًا بك ${member} في **${BOT_NAME}** 🌆\n\n` +
-      `يسعدنا انضمامك إلينا.\n` +
+      `تم إعطاؤك رتبة Player 🎮\n` +
       `يرجى قراءة القوانين أولًا ثم استمتع بوقتك معنا 💙`
     )
     .setFooter({ text: BOT_FOOTER });
