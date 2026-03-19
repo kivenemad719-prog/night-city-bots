@@ -45,8 +45,7 @@ const CATEGORY_PARTNERSHIP_ID = '1484042422626422845';
    إعدادات البوت
 ========================= */
 
-const CLIENT_ID = '1484035052198428843'; // ايدي البوت نفسه
-
+const CLIENT_ID = '1484035052198428843';
 const BOT_NAME = 'Night City Community';
 const BOT_FOOTER = 'Night City Community System';
 
@@ -226,9 +225,7 @@ function buildDecisionPanelEmbed() {
     .setTitle('📢 قرارات الإدارة')
     .setDescription(
       `هذا القسم مخصص للإدارة لإرسال الرسائل إلى جميع أعضاء السيرفر.\n\n` +
-      `عند الضغط على الزر، ستكتب الرسالة مرة واحدة،` +
-      ` ثم يقوم البوت بإرسالها **لكل الأعضاء** في الخاص،` +
-      ` مع كتابة اسم كل عضو داخل رسالته تلقائيًا.`
+      `عند الضغط على الزر، ستكتب الرسالة مرة واحدة، ثم يقوم البوت بإرسالها **لكل الأعضاء** في الخاص، مع كتابة اسم كل عضو داخل رسالته تلقائيًا.`
     )
     .setFooter({ text: BOT_FOOTER });
 }
@@ -418,11 +415,12 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 /* =========================
-   Slash Commands
+   InteractionCreate
 ========================= */
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    /* ===== Slash Commands ===== */
     if (interaction.isChatInputCommand()) {
       if (!isAdmin(interaction.member)) {
         return interaction.reply({
@@ -467,10 +465,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    /* =========================
-       أزرار التذاكر
-    ========================= */
-
+    /* ===== فتح التذاكر ===== */
     if (interaction.isButton() && TICKET_TYPES[interaction.customId]) {
       const ticketInfo = TICKET_TYPES[interaction.customId];
       const guild = interaction.guild;
@@ -504,6 +499,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           {
             id: guild.id,
             deny: [PermissionsBitField.Flags.ViewChannel]
+          },
+          {
+            id: client.user.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.EmbedLinks,
+              PermissionsBitField.Flags.AttachFiles
+            ]
           },
           {
             id: interaction.user.id,
@@ -547,11 +552,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         )
         .setFooter({ text: BOT_FOOTER });
 
-      await ticketChannel.send({
-        content: `${interaction.user} <@&${SUPPORT_ROLE_ID}>`,
-        embeds: [ticketEmbed],
-        components: buildTicketButtons()
-      });
+      try {
+        await ticketChannel.send({
+          content: `${interaction.user} <@&${SUPPORT_ROLE_ID}>`,
+          embeds: [ticketEmbed],
+          components: buildTicketButtons()
+        });
+      } catch (err) {
+        console.error('❌ Error sending ticket message:', err);
+
+        await ticketChannel.send({
+          content: `❌ حصل خطأ في الرسالة الأساسية، لكن التذكرة اتفتحت يا ${interaction.user}`
+        }).catch(() => {});
+      }
 
       await sendLog(
         `📂 تم فتح تذكرة جديدة\n` +
@@ -565,10 +578,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
     }
 
-    /* =========================
-       استلام التذكرة
-    ========================= */
-
+    /* ===== استلام التذكرة ===== */
     if (interaction.isButton() && interaction.customId === 'claim_ticket') {
       if (!isStaff(interaction.member)) {
         return interaction.reply({
@@ -601,10 +611,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    /* =========================
-       Transcript
-    ========================= */
-
+    /* ===== Transcript ===== */
     if (interaction.isButton() && interaction.customId === 'transcript_ticket') {
       if (!isStaff(interaction.member)) {
         return interaction.reply({
@@ -634,10 +641,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    /* =========================
-       إغلاق التذكرة
-    ========================= */
-
+    /* ===== إغلاق التذكرة ===== */
     if (interaction.isButton() && interaction.customId === 'close_ticket') {
       if (!isStaff(interaction.member)) {
         return interaction.reply({
@@ -668,10 +672,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    /* =========================
-       قرارات الإدارة
-    ========================= */
-
+    /* ===== فتح مودال قرارات الإدارة ===== */
     if (interaction.isButton() && interaction.customId === 'open_decision_modal') {
       if (!isAdmin(interaction.member)) {
         return interaction.reply({
@@ -704,10 +705,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.showModal(modal);
     }
 
-    /* =========================
-       إرسال قرار للجميع
-    ========================= */
-
+    /* ===== إرسال قرار للجميع ===== */
     if (interaction.isModalSubmit() && interaction.customId === 'decision_modal') {
       if (!isAdmin(interaction.member)) {
         return interaction.reply({
