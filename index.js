@@ -68,29 +68,50 @@ const BOT_FOOTER = 'Night City Community System';
 
 const EMAIL_USER = process.env.EMAIL_USER || 'nightcity12600@gmail.com';
 const EMAIL_PASS = process.env.EMAIL_PASS || 'bpghzntsoujdptwo';
-const SERVER_LOGO = process.env.SERVER_LOGO || 'https://cdn.discordapp.com/attachments/1484055738753093724/1484655006836719799/53114046-5DF9-4345-94CB-EBF5A32F93C5.png?ex=69bf0439&is=69bdb2b9&hm=c931877619e683c5425ea91ec35ece369cfd7c0426844c75d992ee4ad78db69d&';
+const SERVER_LOGO =
+  process.env.SERVER_LOGO ||
+  'https://cdn.discordapp.com/attachments/1484055738753093724/1484655006836719799/53114046-5DF9-4345-94CB-EBF5A32F93C5.png?ex=69bf0439&is=69bdb2b9&hm=c931877619e683c5425ea91ec35ece369cfd7c0426844c75d992ee4ad78db69d&';
 
 /* =========================
    Email
 ========================= */
 
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false,
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS
+  },
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 20000
+});
+
+transporter.verify((err) => {
+  if (err) {
+    console.log('❌ Email Error:', err.message);
+  } else {
+    console.log('✅ Email Ready');
   }
 });
 
 async function sendEmail(to, subject, html) {
   try {
-    if (!to || !EMAIL_USER || !EMAIL_PASS) return false;
+    if (!to || !EMAIL_USER || !EMAIL_PASS) {
+      console.log('❌ Email skipped: missing email config or recipient');
+      return false;
+    }
+
     await transporter.sendMail({
       from: `"${BOT_NAME}" <${EMAIL_USER}>`,
       to,
       subject,
       html
     });
+
+    console.log(`✅ Email sent to ${to}`);
     return true;
   } catch (err) {
     console.log('❌ Email Error:', err.message);
@@ -456,9 +477,7 @@ function buildDecisionPanelEmbed() {
   return new EmbedBuilder()
     .setColor(0x2B2D31)
     .setTitle('📢 قرارات الإدارة')
-    .setDescription(
-      `هذا القسم مخصص للإدارة لإرسال رسالة لجميع الأعضاء في الخاص.`
-    )
+    .setDescription(`هذا القسم مخصص للإدارة لإرسال رسالة لجميع الأعضاء في الخاص.`)
     .setFooter({ text: BOT_FOOTER });
 }
 
@@ -1387,6 +1406,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         interaction.customId.startsWith('renew_appointment_modal_')
       )
     ) {
+      await interaction.deferUpdate();
+
       const applicantId = interaction.customId
         .replace('set_appointment_modal_', '')
         .replace('renew_appointment_modal_', '');
@@ -1402,7 +1423,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       );
       updatedEmbed.setFields([...fields, { name: 'موعد المقابلة الصوتية', value: appointmentValue }]);
 
-      await interaction.update({
+      await interaction.message.edit({
         embeds: [updatedEmbed],
         components: buildApplicationActionRow(applicantId)
       });
@@ -1447,6 +1468,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const appData = getApplicationData(applicantId) || {};
 
+      const processingEmbed = new EmbedBuilder()
+        .setColor(0xFEE75C)
+        .setTitle('⏳ جاري قبول التقديم...')
+        .setDescription(`👤 **المتقدم:** <@${applicantId}>\n🛡️ **بواسطة:** ${interaction.user.tag}`)
+        .setFooter({ text: BOT_FOOTER });
+
+      await interaction.message.edit({
+        embeds: [processingEmbed],
+        components: buildFinalApplicationActionRow(true)
+      }).catch(() => {});
+
       for (const roleId of APPROVED_ADMIN_ROLE_IDS) {
         await member.roles.add(roleId).catch(() => {});
       }
@@ -1485,7 +1517,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setThumbnail(SERVER_LOGO)
         .setFooter({ text: BOT_FOOTER });
 
-      await interaction.editReply({
+      await interaction.message.edit({
         embeds: [acceptedReview],
         components: buildFinalApplicationActionRow(true)
       });
@@ -1521,9 +1553,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('reject_application_reason_')) {
+      await interaction.deferUpdate();
+
       const applicantId = interaction.customId.replace('reject_application_reason_', '');
       const reason = interaction.fields.getTextInputValue('reject_reason').trim();
       const appData = getApplicationData(applicantId) || {};
+
+      const processingEmbed = new EmbedBuilder()
+        .setColor(0xFEE75C)
+        .setTitle('⏳ جاري رفض التقديم...')
+        .setDescription(`👤 **المتقدم:** <@${applicantId}>\n🛡️ **بواسطة:** ${interaction.user.tag}`)
+        .setFooter({ text: BOT_FOOTER });
+
+      await interaction.message.edit({
+        embeds: [processingEmbed],
+        components: buildFinalApplicationActionRow(false)
+      }).catch(() => {});
 
       const user = await client.users.fetch(applicantId).catch(() => null);
       if (user) {
@@ -1558,7 +1603,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setThumbnail(SERVER_LOGO)
         .setFooter({ text: BOT_FOOTER });
 
-      await interaction.update({
+      await interaction.message.edit({
         embeds: [rejectedReview],
         components: buildFinalApplicationActionRow(false)
       });
