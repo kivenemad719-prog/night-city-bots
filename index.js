@@ -21,6 +21,7 @@ const {
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const nodemailer = require('nodemailer');
 
 /* =========================
    IDs - حطهم هنا
@@ -67,6 +68,36 @@ const BOT_NAME = 'Night City Community';
 const BOT_FOOTER = 'Night City Community System';
 
 /* =========================
+   إعدادات الإيميل داخل index.js
+========================= */
+
+const EMAIL_USER = 'kivenemad719@gmail.com';
+const EMAIL_PASS = 'Keko7012@@@@';
+const SERVER_LOGO = 'PUT_SERVER_LOGO_LINK_HERE';
+const SERVER_NAME = 'Night City Community';
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: EMAIL_USER,
+    pass: EMAIL_PASS
+  }
+});
+
+async function sendEmail(to, subject, html) {
+  try {
+    await transporter.sendMail({
+      from: `"${BOT_NAME}" <${EMAIL_USER}>`,
+      to,
+      subject,
+      html
+    });
+  } catch (err) {
+    console.log('❌ Email Error:', err.message);
+  }
+}
+
+/* =========================
    Data file
 ========================= */
 
@@ -75,12 +106,38 @@ const DATA_FILE = path.join(__dirname, 'bot-data.json');
 function loadData() {
   try {
     if (!fs.existsSync(DATA_FILE)) {
-      return { ticketCounter: 1 };
+      return {
+        ticketCounter: 1,
+        applications: {},
+        system: {
+          tickets: true,
+          applications: true
+        }
+      };
     }
+
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+
+    if (!parsed.ticketCounter) parsed.ticketCounter = 1;
+    if (!parsed.applications) parsed.applications = {};
+    if (!parsed.system) {
+      parsed.system = {
+        tickets: true,
+        applications: true
+      };
+    }
+
+    return parsed;
   } catch {
-    return { ticketCounter: 1 };
+    return {
+      ticketCounter: 1,
+      applications: {},
+      system: {
+        tickets: true,
+        applications: true
+      }
+    };
   }
 }
 
@@ -170,6 +227,32 @@ function getNextTicketId() {
 
 function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function sanitizeName(name) {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]/g, '')
+      .slice(0, 12) || 'user'
+  );
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function setApplicationData(userId, payload) {
+  if (!dataStore.applications) dataStore.applications = {};
+  dataStore.applications[userId] = {
+    ...(dataStore.applications[userId] || {}),
+    ...payload
+  };
+  saveData(dataStore);
+}
+
+function getApplicationData(userId) {
+  return dataStore.applications?.[userId] || null;
 }
 
 async function fetchChannel(channelId) {
@@ -293,6 +376,32 @@ function buildDecisionPanelRow() {
   );
 }
 
+function buildDashboardEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x2B2D31)
+    .setTitle('⚙️ لوحة التحكم')
+    .setDescription(
+      `🎫 حالة التذاكر: ${dataStore.system.tickets ? '🟢 شغال' : '🔴 متوقف'}\n` +
+      `📋 حالة التقديمات: ${dataStore.system.applications ? '🟢 شغال' : '🔴 متوقف'}`
+    )
+    .setFooter({ text: BOT_FOOTER });
+}
+
+function buildDashboardButtons() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('toggle_tickets')
+        .setLabel('تشغيل/إيقاف التذاكر')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('toggle_apps')
+        .setLabel('تشغيل/إيقاف التقديمات')
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
+
 function buildTicketButtons() {
   return [
     new ActionRowBuilder().addComponents(
@@ -327,7 +436,17 @@ function buildApplicationActionRow(applicantId) {
         .setCustomId(`reject_application_${applicantId}`)
         .setLabel('رفض')
         .setEmoji('❌')
-        .setStyle(ButtonStyle.Danger)
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`set_appointment_${applicantId}`)
+        .setLabel('تحديد موعد')
+        .setEmoji('📅')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`renew_appointment_${applicantId}`)
+        .setLabel('تجديد الموعد')
+        .setEmoji('🔄')
+        .setStyle(ButtonStyle.Secondary)
     )
   ];
 }
@@ -346,6 +465,18 @@ function buildFinalApplicationActionRow(accepted = false) {
         .setLabel(accepted ? 'رفض' : 'تم الرفض')
         .setEmoji('❌')
         .setStyle(ButtonStyle.Danger)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId('application_done_time')
+        .setLabel('تحديد موعد')
+        .setEmoji('📅')
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId('application_done_renew')
+        .setLabel('تجديد الموعد')
+        .setEmoji('🔄')
+        .setStyle(ButtonStyle.Secondary)
         .setDisabled(true)
     )
   ];
@@ -376,6 +507,100 @@ function buildRatingRow(ticketId) {
         .setStyle(ButtonStyle.Success)
     )
   ];
+}
+
+function buildAcceptEmailHtml(username, appointmentText) {
+  return `
+  <div style="font-family:Arial,sans-serif;background:#edf0f5;padding:20px;direction:rtl;text-align:right;">
+    <div style="max-width:700px;margin:auto;background:#f5f7fb;border-radius:18px;overflow:hidden;border:1px solid #cfd8e3;">
+      <div style="background:#cfeaf5;padding:30px;text-align:center;border-bottom:4px solid #4f91ad;">
+        <img src="${SERVER_LOGO}" alt="logo" width="180" style="border-radius:50%;display:block;margin:auto;">
+        <h1 style="margin:20px 0 0;color:#0d617f;font-size:52px;">🎉 تم قبول طلبك!</h1>
+        <div style="margin-top:18px;font-size:30px;font-weight:bold;color:#163a52;">
+          <span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span>
+        </div>
+      </div>
+
+      <div style="padding:35px 40px;color:#33566a;font-size:22px;line-height:2;">
+        <p>مرحبًا <strong style="color:#0d617f;">${username}</strong>،</p>
+        <p>
+          نود إعلامك بأن طلبك للانضمام إلى
+          <strong><span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span></strong>
+          قد تم قبوله بنجاح 🎊
+        </p>
+
+        <div style="background:#d9eef7;border-radius:18px;padding:25px;margin:25px 0;border-right:8px solid #0d617f;">
+          <h2 style="margin-top:0;color:#0d617f;">📅 موعد المقابلة الصوتية</h2>
+          <div style="font-size:21px;color:#355667;">
+            ${appointmentText || 'سيتم تحديد الموعد قريبًا.'}
+          </div>
+        </div>
+
+        <div style="background:#eef4fb;border:1px solid #c9d6e4;border-radius:18px;padding:25px;">
+          <h2 style="margin-top:0;color:#0d617f;">📋 الخطوات التالية:</h2>
+          <ul style="padding-right:20px;line-height:2;">
+            <li>🎙️ إجراء المقابلة الصوتية مع الإدارة</li>
+            <li>📌 التأكد من تواجدك في الوقت المحدد</li>
+            <li>🎤 التأكد من أن الميكروفون يعمل بشكل صحيح</li>
+            <li>📜 الالتزام بقوانين السيرفر</li>
+          </ul>
+        </div>
+
+        <p style="text-align:center;margin-top:30px;font-size:24px;">
+          🚀 نتمنى لك تجربة ممتعة معنا
+        </p>
+      </div>
+
+      <div style="border-top:1px solid #cfd8e3;padding:20px;text-align:center;color:#5b7890;font-size:18px;">
+        <strong><span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span></strong>
+        — هذا إيميل تلقائي من
+        <br>© 2026 ${SERVER_NAME}. جميع الحقوق محفوظة.
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+function buildRejectEmailHtml(username, reason) {
+  return `
+  <div style="font-family:Arial,sans-serif;background:#edf0f5;padding:20px;direction:rtl;text-align:right;">
+    <div style="max-width:700px;margin:auto;background:#f5f7fb;border-radius:18px;overflow:hidden;border:1px solid #cfd8e3;">
+      <div style="background:#f4d7d7;padding:30px;text-align:center;border-bottom:4px solid #c04848;">
+        <img src="${SERVER_LOGO}" alt="logo" width="180" style="border-radius:50%;display:block;margin:auto;">
+        <h1 style="margin:20px 0 0;color:#8a1f1f;font-size:52px;">❌ تم رفض الطلب</h1>
+        <div style="margin-top:18px;font-size:30px;font-weight:bold;color:#163a52;">
+          <span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span>
+        </div>
+      </div>
+
+      <div style="padding:35px 40px;color:#33566a;font-size:22px;line-height:2;">
+        <p>مرحبًا <strong style="color:#8a1f1f;">${username}</strong>،</p>
+        <p>
+          نود إعلامك بأن طلبك للانضمام إلى
+          <strong><span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span></strong>
+          لم يتم قبوله هذه المرة.
+        </p>
+
+        <div style="background:#fdeaea;border-radius:18px;padding:25px;margin:25px 0;border-right:8px solid #c04848;">
+          <h2 style="margin-top:0;color:#8a1f1f;">📄 سبب الرفض</h2>
+          <div style="font-size:21px;color:#5c3636;">
+            ${reason}
+          </div>
+        </div>
+
+        <p style="text-align:center;margin-top:30px;font-size:22px;">
+          يمكنك التقديم مرة أخرى لاحقًا بعد تحسين الطلب.
+        </p>
+      </div>
+
+      <div style="border-top:1px solid #cfd8e3;padding:20px;text-align:center;color:#5b7890;font-size:18px;">
+        <strong><span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span></strong>
+        — هذا إيميل تلقائي من
+        <br>© 2026 ${SERVER_NAME}. جميع الحقوق محفوظة.
+      </div>
+    </div>
+  </div>
+  `;
 }
 
 async function panelExists(channel, title) {
@@ -480,6 +705,11 @@ async function registerSlashCommands() {
     new SlashCommandBuilder()
       .setName('panel-decisions')
       .setDescription('إرسال لوحة قرارات الإدارة')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator),
+
+    new SlashCommandBuilder()
+      .setName('dashboard')
+      .setDescription('لوحة التحكم')
       .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator)
   ].map((cmd) => cmd.toJSON());
 
@@ -521,6 +751,14 @@ async function startAdminApplication(interaction) {
       question: '📌 ما الاسم الكامل؟',
       minWords: 2,
       shortError: '❌ تم رفض التقديم: الاسم الكامل قصير جدًا.'
+    },
+    {
+      key: 'email',
+      question: '📧 ما هو البريد الإلكتروني الخاص بك؟',
+      validate(answer) {
+        if (!isValidEmail(answer)) return '❌ الإيميل غير صحيح.';
+        return null;
+      }
     },
     {
       key: 'age',
@@ -588,7 +826,7 @@ async function startAdminApplication(interaction) {
     await dm.send(
       `📋 **بدأ التقديم على الإدارة**\n\n` +
       `سيتم سؤالك سؤالًا واحدًا في كل مرة.\n` +
-      `إذا كان العمر أقل من 18 أو الإجابات قصيرة جدًا سيتم رفض التقديم تلقائيًا.`
+      `إذا كان العمر أقل من 18 أو الإيميل غير صحيح أو الإجابات قصيرة جدًا سيتم رفض التقديم تلقائيًا.`
     );
 
     for (const q of questions) {
@@ -641,6 +879,22 @@ async function startAdminApplication(interaction) {
       answers[q.key] = answer;
     }
 
+    setApplicationData(user.id, {
+      email: answers.email,
+      appointment: null,
+      username: user.username,
+      full_name: answers.full_name,
+      age: answers.age,
+      country_city: answers.country_city,
+      hours: answers.hours,
+      experience: answers.experience,
+      why_admin: answers.why_admin,
+      problem_handling: answers.problem_handling,
+      special: answers.special,
+      server_rules: answers.server_rules,
+      activity_days: answers.activity_days
+    });
+
     const reviewEmbed = new EmbedBuilder()
       .setColor(0x5865F2)
       .setTitle('📋 تقديم جديد للإدارة')
@@ -650,6 +904,7 @@ async function startAdminApplication(interaction) {
       )
       .addFields(
         { name: 'الاسم الكامل', value: answers.full_name || 'غير موجود' },
+        { name: 'البريد الإلكتروني', value: answers.email || 'غير موجود' },
         { name: 'العمر', value: answers.age || 'غير موجود' },
         { name: 'الدولة / المدينة', value: answers.country_city || 'غير موجود' },
         { name: 'ساعات التواجد', value: answers.hours || 'غير موجود' },
@@ -658,7 +913,8 @@ async function startAdminApplication(interaction) {
         { name: 'كيف يتعامل مع المشاكل', value: answers.problem_handling || 'غير موجود' },
         { name: 'ما الذي يميزه', value: answers.special || 'غير موجود' },
         { name: 'فهم القوانين', value: answers.server_rules || 'غير موجود' },
-        { name: 'أيام النشاط', value: answers.activity_days || 'غير موجود' }
+        { name: 'أيام النشاط', value: answers.activity_days || 'غير موجود' },
+        { name: 'موعد المقابلة الصوتية', value: 'لم يتم تحديده بعد' }
       )
       .setFooter({ text: BOT_FOOTER });
 
@@ -769,15 +1025,76 @@ client.on(Events.InteractionCreate, async (interaction) => {
           ephemeral: true
         });
       }
+
+      if (interaction.commandName === 'dashboard') {
+        return interaction.reply({
+          embeds: [buildDashboardEmbed()],
+          components: buildDashboardButtons(),
+          ephemeral: true
+        });
+      }
+    }
+
+    /* ===== Dashboard ===== */
+    if (interaction.isButton() && interaction.customId === 'toggle_tickets') {
+      if (!isAdmin(interaction.member)) {
+        return interaction.reply({
+          content: '❌ هذا الزر للإدارة فقط.',
+          ephemeral: true
+        });
+      }
+
+      dataStore.system.tickets = !dataStore.system.tickets;
+      saveData(dataStore);
+
+      await sendLog(`⚙️ تم تغيير حالة التذاكر بواسطة ${interaction.user.tag} إلى ${dataStore.system.tickets ? 'ON' : 'OFF'}`);
+
+      return interaction.update({
+        embeds: [buildDashboardEmbed()],
+        components: buildDashboardButtons()
+      });
+    }
+
+    if (interaction.isButton() && interaction.customId === 'toggle_apps') {
+      if (!isAdmin(interaction.member)) {
+        return interaction.reply({
+          content: '❌ هذا الزر للإدارة فقط.',
+          ephemeral: true
+        });
+      }
+
+      dataStore.system.applications = !dataStore.system.applications;
+      saveData(dataStore);
+
+      await sendLog(`⚙️ تم تغيير حالة التقديمات بواسطة ${interaction.user.tag} إلى ${dataStore.system.applications ? 'ON' : 'OFF'}`);
+
+      return interaction.update({
+        embeds: [buildDashboardEmbed()],
+        components: buildDashboardButtons()
+      });
     }
 
     /* ===== تقديم للإدارة ===== */
     if (interaction.isButton() && interaction.customId === 'apply_admin') {
+      if (!dataStore.system.applications) {
+        return interaction.reply({
+          content: '❌ التقديمات متوقفة حالياً.',
+          ephemeral: true
+        });
+      }
+
       return startAdminApplication(interaction);
     }
 
     /* ===== فتح التذاكر ===== */
     if (interaction.isButton() && TICKET_TYPES[interaction.customId]) {
+      if (!dataStore.system.tickets) {
+        return interaction.reply({
+          content: '❌ نظام التذاكر متوقف حالياً.',
+          ephemeral: true
+        });
+      }
+
       const ticketInfo = TICKET_TYPES[interaction.customId];
       const guild = interaction.guild;
 
@@ -1079,7 +1396,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .addFields(
             { name: 'رقم التذكرة', value: `#${ticketId}`, inline: true },
             { name: 'التقييم', value: '⭐'.repeat(Number(stars)), inline: true },
-            { name: 'السبب', value: reason }
+            { name: 'السبب', value: reason },
+            { name: '👤 العضو', value: interaction.user.tag }
           )
           .setFooter({ text: BOT_FOOTER });
 
@@ -1182,6 +1500,116 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
     }
 
+    /* ===== تحديد موعد أو تجديد موعد ===== */
+    if (
+      interaction.isButton() &&
+      (
+        interaction.customId.startsWith('set_appointment_') ||
+        interaction.customId.startsWith('renew_appointment_')
+      )
+    ) {
+      if (!isStaff(interaction.member)) {
+        return interaction.reply({
+          content: '❌ هذا الزر للإدارة فقط.',
+          ephemeral: true
+        });
+      }
+
+      const applicantId = interaction.customId
+        .replace('set_appointment_', '')
+        .replace('renew_appointment_', '');
+
+      const isRenew = interaction.customId.startsWith('renew_appointment_');
+
+      const modal = new ModalBuilder()
+        .setCustomId(`${isRenew ? 'renew' : 'set'}_appointment_modal_${applicantId}`)
+        .setTitle(isRenew ? 'تجديد موعد المقابلة الصوتية' : 'تحديد موعد المقابلة الصوتية');
+
+      const appointmentInput = new TextInputBuilder()
+        .setCustomId('appointment_value')
+        .setLabel('اكتب الموعد')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(appointmentInput)
+      );
+
+      return interaction.showModal(modal);
+    }
+
+    /* ===== مودال حفظ / تجديد الموعد ===== */
+    if (
+      interaction.isModalSubmit() &&
+      (
+        interaction.customId.startsWith('set_appointment_modal_') ||
+        interaction.customId.startsWith('renew_appointment_modal_')
+      )
+    ) {
+      if (!isStaff(interaction.member)) {
+        return interaction.reply({
+          content: '❌ هذا الإجراء للإدارة فقط.',
+          ephemeral: true
+        });
+      }
+
+      const applicantId = interaction.customId
+        .replace('set_appointment_modal_', '')
+        .replace('renew_appointment_modal_', '');
+
+      const appointmentValue = interaction.fields.getTextInputValue('appointment_value').trim();
+      const oldData = getApplicationData(applicantId) || {};
+
+      setApplicationData(applicantId, {
+        appointment: appointmentValue
+      });
+
+      const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
+
+      const filteredFields = (updatedEmbed.data.fields || []).filter(
+        (field) => field.name !== 'موعد المقابلة الصوتية'
+      );
+
+      updatedEmbed.setFields([
+        ...filteredFields,
+        { name: 'موعد المقابلة الصوتية', value: appointmentValue || 'غير موجود' }
+      ]);
+
+      await interaction.update({
+        embeds: [updatedEmbed],
+        components: buildApplicationActionRow(applicantId)
+      });
+
+      if (oldData?.email) {
+        try {
+          await sendEmail(
+            oldData.email,
+            'تحديد / تجديد موعد المقابلة الصوتية',
+            buildAcceptEmailHtml(oldData.username || 'Member', appointmentValue)
+          );
+        } catch (err) {
+          console.log('❌ Failed to send appointment email');
+        }
+      }
+
+      const user = await client.users.fetch(applicantId).catch(() => null);
+      if (user) {
+        await user.send(
+          `📅 **تم ${interaction.customId.startsWith('renew_') ? 'تجديد' : 'تحديد'} موعد المقابلة الصوتية**\n\n` +
+          `${appointmentValue}`
+        ).catch(() => {});
+      }
+
+      await sendLog(
+        `📅 تم ${interaction.customId.startsWith('renew_') ? 'تجديد' : 'تحديد'} موعد مقابلة\n` +
+        `للمتقدم: ${applicantId}\n` +
+        `بواسطة: ${interaction.user.tag}\n` +
+        `الموعد: ${appointmentValue}`
+      );
+
+      return;
+    }
+
     /* ===== قبول التقديم ===== */
     if (interaction.isButton() && interaction.customId.startsWith('accept_application_')) {
       if (!isStaff(interaction.member)) {
@@ -1201,14 +1629,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
       }
 
+      const appData = getApplicationData(applicantId) || {};
+
       for (const roleId of APPROVED_ADMIN_ROLE_IDS) {
         await member.roles.add(roleId).catch(() => {});
       }
 
       await member.send(
         `✅ **تم قبولك في الإدارة**\n\n` +
-        `مبروك، تم قبول طلبك في سيرفر **${BOT_NAME}**.`
+        `مبروك، تم قبول طلبك في سيرفر **${BOT_NAME}**.\n\n` +
+        `📅 موعد المقابلة الصوتية:\n${appData.appointment || 'سيتم تحديده قريبًا.'}`
       ).catch(() => {});
+
+      if (appData.email && isValidEmail(appData.email)) {
+        await sendEmail(
+          appData.email,
+          'تم قبولك في Night City Community',
+          buildAcceptEmailHtml(member.user.username, appData.appointment || 'سيتم تحديد الموعد قريبًا.')
+        );
+      }
 
       const acceptedEmbed = new EmbedBuilder()
         .setColor(0x2B2D31)
@@ -1218,6 +1657,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 + تم قبول هذا المتقدم بنجاح
 \`\`\`\n` +
           `👤 **المتقدم:** <@${applicantId}>\n` +
+          `📅 **موعد المقابلة الصوتية:** ${appData.appointment || 'غير محدد'}\n` +
           `🛡️ **تم بواسطة:** ${interaction.user.tag}`
         )
         .setFooter({ text: BOT_FOOTER });
@@ -1270,6 +1710,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const applicantId = interaction.customId.replace('reject_application_reason_', '');
       const reason = interaction.fields.getTextInputValue('reject_reason').trim();
+      const appData = getApplicationData(applicantId) || {};
 
       const user = await client.users.fetch(applicantId).catch(() => null);
       if (user) {
@@ -1277,6 +1718,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
           `❌ **تم رفض طلبك للإدارة**\n\n` +
           `السبب:\n${reason}`
         ).catch(() => {});
+      }
+
+      if (appData.email && isValidEmail(appData.email)) {
+        await sendEmail(
+          appData.email,
+          'تم رفض طلبك في Night City Community',
+          buildRejectEmailHtml(appData.username || 'Member', reason)
+        );
       }
 
       const rejectedEmbed = new EmbedBuilder()
