@@ -168,15 +168,6 @@ function getNextTicketId() {
   return id;
 }
 
-function sanitizeName(name) {
-  return (
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9-_]/g, '')
-      .slice(0, 12) || 'user'
-  );
-}
-
 function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -1211,9 +1202,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       for (const roleId of APPROVED_ADMIN_ROLE_IDS) {
-        if (roleId && !roleId.startsWith('PUT_')) {
-          await member.roles.add(roleId).catch(() => {});
-        }
+        await member.roles.add(roleId).catch(() => {});
       }
 
       await member.send(
@@ -1221,9 +1210,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
         `مبروك، تم قبول طلبك في سيرفر **${BOT_NAME}**.`
       ).catch(() => {});
 
-      const acceptedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
-        .setColor(0x57F287)
-        .setFooter({ text: `${BOT_FOOTER} • Accepted by ${interaction.user.tag}` });
+      const acceptedEmbed = new EmbedBuilder()
+        .setColor(0x2B2D31)
+        .setTitle('✅ تم قبول التقديم')
+        .setDescription(
+          `\`\`\`diff
++ تم قبول هذا المتقدم بنجاح
+\`\`\`\n` +
+          `👤 **المتقدم:** <@${applicantId}>\n` +
+          `🛡️ **تم بواسطة:** ${interaction.user.tag}`
+        )
+        .setFooter({ text: BOT_FOOTER });
 
       await interaction.update({
         embeds: [acceptedEmbed],
@@ -1282,9 +1279,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         ).catch(() => {});
       }
 
-      const rejectedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
-        .setColor(0xED4245)
-        .setFooter({ text: `${BOT_FOOTER} • Rejected by ${interaction.user.tag}` });
+      const rejectedEmbed = new EmbedBuilder()
+        .setColor(0x2B2D31)
+        .setTitle('❌ تم رفض التقديم')
+        .setDescription(
+          `\`\`\`diff
+- تم رفض هذا المتقدم
+\`\`\`\n` +
+          `👤 **المتقدم:** <@${applicantId}>\n` +
+          `📄 **السبب:** ${reason}\n` +
+          `🛡️ **تم بواسطة:** ${interaction.user.tag}`
+        )
+        .setFooter({ text: BOT_FOOTER });
 
       await interaction.update({
         embeds: [rejectedEmbed],
