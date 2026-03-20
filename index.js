@@ -71,8 +71,8 @@ const BOT_FOOTER = 'Night City Community System';
    إعدادات الإيميل داخل index.js
 ========================= */
 
-const EMAIL_USER = 'kivenemad719@gmail.com';
-const EMAIL_PASS = 'Keko7012@@@@';
+const EMAIL_USER = 'nightcity12600@gmail.com';
+const EMAIL_PASS = 'Plus10700';
 const SERVER_LOGO = 'PUT_SERVER_LOGO_LINK_HERE';
 const SERVER_NAME = 'Night City Community';
 
