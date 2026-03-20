@@ -76,9 +76,9 @@ const BOT_FOOTER = 'Night City Community System';
    خليهم في Railway variables أو .env
 ========================= */
 
-const EMAIL_USER = process.env.EMAIL_USER || 'PUT_BOT_EMAIL_HERE@gmail.com';
-const EMAIL_PASS = process.env.EMAIL_PASS || 'PUT_APP_PASSWORD_HERE';
-const SERVER_LOGO = process.env.SERVER_LOGO || 'PUT_SERVER_LOGO_LINK_HERE';
+const EMAIL_USER = process.env.EMAIL_USER || 'nightcity12600@gmail.com';
+const EMAIL_PASS = process.env.EMAIL_PASS || 'Plus10700';
+const SERVER_LOGO = process.env.SERVER_LOGO || 'https://cdn.discordapp.com/attachments/1482660558107967498/1484642310628053185/53114046-5DF9-4345-94CB-EBF5A32F93C5.png?ex=69bef866&is=69bda6e6&hm=cfc1e4108cbf4ff257875d55add8018de70ad4cae065f695e30b0b496078c1e0&';
 const SERVER_NAME = 'Night City Community';
 
 /* =========================
