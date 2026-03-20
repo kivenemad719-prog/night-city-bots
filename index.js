@@ -24,7 +24,7 @@ const path = require('path');
 const nodemailer = require('nodemailer');
 
 /* =========================
-   IDs - حطهم هنا
+   IDs
 ========================= */
 
 const GUILD_ID = '1482955089391124583';
@@ -38,6 +38,8 @@ const RULES_CHANNEL_ID = '1484026706053431316';
 const TICKETS_PANEL_CHANNEL_ID = '1484075251389435934';
 const DECISION_CHANNEL_ID = '1484041156428955738';
 const LOG_CHANNEL_ID = '1484041450478895184';
+const REVIEW_CHANNEL_ID = '1484303917998276648';
+const APPLICATION_REVIEW_CHANNEL_ID = '1484304595730829352';
 
 const CATEGORY_SUPPORT_ID = '1484041614320996413';
 const CATEGORY_REPORTS_ID = '1484041819330183279';
@@ -46,16 +48,9 @@ const CATEGORY_SUGGESTIONS_ID = '1484042283673190491';
 const CATEGORY_PARTNERSHIP_ID = '1484042422626422845';
 
 /* =========================
-   IDs جديدة
+   Roles on accept
 ========================= */
 
-const REVIEW_CHANNEL_ID = '1484303917998276648';
-const APPLICATION_REVIEW_CHANNEL_ID = '1484304595730829352';
-
-/* 
-  الرولات اللي ياخدها لو اتقبل
-  غيّرهم براحتك
-*/
 const APPROVED_ADMIN_ROLE_IDS = [
   '1484244769566752819',
   '1484244554176663572',
@@ -64,22 +59,44 @@ const APPROVED_ADMIN_ROLE_IDS = [
 ];
 
 /* =========================
-   إعدادات البوت
+   Settings
 ========================= */
 
 const CLIENT_ID = '1484035052198428843';
 const BOT_NAME = 'Night City Community';
 const BOT_FOOTER = 'Night City Community System';
 
-/* =========================
-   إعدادات الإيميل
-   خليهم في Railway variables أو .env
-========================= */
-
 const EMAIL_USER = process.env.EMAIL_USER || 'nightcity12600@gmail.com';
 const EMAIL_PASS = process.env.EMAIL_PASS || 'Plus10700';
-const SERVER_LOGO = process.env.SERVER_LOGO || 'https://cdn.discordapp.com/attachments/1482660558107967498/1484642310628053185/53114046-5DF9-4345-94CB-EBF5A32F93C5.png?ex=69bef866&is=69bda6e6&hm=cfc1e4108cbf4ff257875d55add8018de70ad4cae065f695e30b0b496078c1e0&';
-const SERVER_NAME = 'Night City Community';
+const SERVER_LOGO = process.env.SERVER_LOGO || 'https://cdn.discordapp.com/attachments/1484055738753093724/1484655006836719799/53114046-5DF9-4345-94CB-EBF5A32F93C5.png?ex=69bf0439&is=69bdb2b9&hm=c931877619e683c5425ea91ec35ece369cfd7c0426844c75d992ee4ad78db69d&';
+
+/* =========================
+   Email
+========================= */
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: EMAIL_USER,
+    pass: EMAIL_PASS
+  }
+});
+
+async function sendEmail(to, subject, html) {
+  try {
+    if (!to || !EMAIL_USER || !EMAIL_PASS) return false;
+    await transporter.sendMail({
+      from: `"${BOT_NAME}" <${EMAIL_USER}>`,
+      to,
+      subject,
+      html
+    });
+    return true;
+  } catch (err) {
+    console.log('❌ Email Error:', err.message);
+    return false;
+  }
+}
 
 /* =========================
    Data file
@@ -112,10 +129,7 @@ function defaultData() {
 
 function loadData() {
   try {
-    if (!fs.existsSync(DATA_FILE)) {
-      return defaultData();
-    }
-
+    if (!fs.existsSync(DATA_FILE)) return defaultData();
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
     const parsed = JSON.parse(raw);
     const base = defaultData();
@@ -123,6 +137,8 @@ function loadData() {
     return {
       ...base,
       ...parsed,
+      applications: parsed.applications || {},
+      ticketCounter: parsed.ticketCounter || 1,
       system: {
         ...base.system,
         ...(parsed.system || {}),
@@ -130,9 +146,7 @@ function loadData() {
           ...base.system.buttons,
           ...((parsed.system && parsed.system.buttons) || {})
         }
-      },
-      applications: parsed.applications || {},
-      ticketCounter: parsed.ticketCounter || 1
+      }
     };
   } catch {
     return defaultData();
@@ -142,43 +156,12 @@ function loadData() {
 function saveData(data) {
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-  } catch (err) {
+  } catch {
     console.log('❌ Failed to save data file');
   }
 }
 
 const dataStore = loadData();
-
-/* =========================
-   Email
-========================= */
-
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS
-  }
-});
-
-async function sendEmail(to, subject, html) {
-  try {
-    if (!to || !EMAIL_USER || !EMAIL_PASS) return false;
-
-    await transporter.sendMail({
-      from: `"${BOT_NAME}" <${EMAIL_USER}>`,
-      to,
-      subject,
-      html
-    });
-
-    console.log(`✅ Email sent to ${to}`);
-    return true;
-  } catch (err) {
-    console.log('❌ Email Error:', err.message);
-    return false;
-  }
-}
 
 /* =========================
    Client
@@ -196,7 +179,7 @@ const client = new Client({
 });
 
 /* =========================
-   أنواع التذاكر
+   Ticket types
 ========================= */
 
 const TICKET_TYPES = {
@@ -237,10 +220,6 @@ const TICKET_TYPES = {
   }
 };
 
-/* =========================
-   تخزين مؤقت
-========================= */
-
 const claimedTickets = new Map();
 
 /* =========================
@@ -258,17 +237,29 @@ function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-function sanitizeName(name) {
-  return (
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9-_]/g, '')
-      .slice(0, 12) || 'user'
-  );
-}
-
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isAdmin(member) {
+  return member?.roles?.cache?.has(ADMIN_ROLE_ID);
+}
+
+function isSupport(member) {
+  return member?.roles?.cache?.has(SUPPORT_ROLE_ID);
+}
+
+function isStaff(member) {
+  return isAdmin(member) || isSupport(member);
+}
+
+function isButtonEnabled(key) {
+  return Boolean(dataStore.system?.buttons?.[key]);
+}
+
+function toggleButtonSetting(key) {
+  dataStore.system.buttons[key] = !dataStore.system.buttons[key];
+  saveData(dataStore);
 }
 
 function setApplicationData(userId, payload) {
@@ -281,22 +272,6 @@ function setApplicationData(userId, payload) {
 
 function getApplicationData(userId) {
   return dataStore.applications?.[userId] || null;
-}
-
-function removeApplicationData(userId) {
-  if (dataStore.applications[userId]) {
-    delete dataStore.applications[userId];
-    saveData(dataStore);
-  }
-}
-
-function isButtonEnabled(key) {
-  return Boolean(dataStore.system?.buttons?.[key]);
-}
-
-function toggleButtonSetting(key) {
-  dataStore.system.buttons[key] = !dataStore.system.buttons[key];
-  saveData(dataStore);
 }
 
 async function fetchChannel(channelId) {
@@ -313,16 +288,115 @@ async function sendLog(content) {
   await logChannel.send({ content }).catch(() => {});
 }
 
-function isAdmin(member) {
-  return member?.roles?.cache?.has(ADMIN_ROLE_ID);
+function parseTicketTopic(topic) {
+  if (!topic) return {};
+  const ownerMatch = topic.match(/OWNER:(\d+)/);
+  const typeMatch = topic.match(/TYPE:([a-z_]+)/);
+  const idMatch = topic.match(/ID:(\d+)/);
+
+  return {
+    ownerId: ownerMatch ? ownerMatch[1] : null,
+    ticketType: typeMatch ? typeMatch[1] : null,
+    ticketId: idMatch ? idMatch[1] : null
+  };
 }
 
-function isSupport(member) {
-  return member?.roles?.cache?.has(SUPPORT_ROLE_ID);
+async function createTranscript(channel) {
+  const fetched = await channel.messages.fetch({ limit: 100 });
+  const messages = [...fetched.values()].reverse();
+
+  let content = `Transcript for #${channel.name}\nGenerated at: ${new Date().toISOString()}\n`;
+  content += '============================================================\n\n';
+
+  for (const msg of messages) {
+    const date = new Date(msg.createdTimestamp).toLocaleString('en-US');
+    content += `[${date}] ${msg.author.tag}: ${msg.content || '[embed/attachment]'}\n`;
+  }
+
+  return Buffer.from(content, 'utf-8');
 }
 
-function isStaff(member) {
-  return isAdmin(member) || isSupport(member);
+/* =========================
+   Email templates
+========================= */
+
+function buildAcceptEmailHtml(username, appointmentText) {
+  return `
+  <div style="font-family:Arial,sans-serif;background:#edf0f5;padding:20px;direction:rtl;text-align:right;">
+    <div style="max-width:700px;margin:auto;background:#f5f7fb;border-radius:18px;overflow:hidden;border:1px solid #cfd8e3;">
+      <div style="background:#cfeaf5;padding:30px;text-align:center;border-bottom:4px solid #4f91ad;">
+        <img src="${SERVER_LOGO}" alt="logo" width="180" style="border-radius:50%;display:block;margin:auto;">
+        <h1 style="margin:20px 0 0;color:#0d617f;font-size:48px;">🎉 تم قبول طلبك</h1>
+        <div style="margin-top:18px;font-size:28px;font-weight:bold;color:#163a52;">${BOT_NAME}</div>
+      </div>
+
+      <div style="padding:35px 40px;color:#33566a;font-size:22px;line-height:2;">
+        <p>مرحبًا <strong style="color:#0d617f;">${username}</strong>،</p>
+        <p>تم قبول طلبك بنجاح داخل <strong>${BOT_NAME}</strong>.</p>
+
+        <div style="background:#d9eef7;border-radius:18px;padding:25px;margin:25px 0;border-right:8px solid #0d617f;">
+          <h2 style="margin-top:0;color:#0d617f;">📅 موعد المقابلة الصوتية</h2>
+          <div style="font-size:21px;color:#355667;">${appointmentText || 'سيتم تحديده قريبًا.'}</div>
+        </div>
+
+        <div style="background:#eef4fb;border:1px solid #c9d6e4;border-radius:18px;padding:25px;">
+          <h2 style="margin-top:0;color:#0d617f;">📋 الخطوات التالية</h2>
+          <ul style="padding-right:20px;line-height:2;">
+            <li>🎙️ حضور المقابلة الصوتية</li>
+            <li>📌 الالتزام بالموعد</li>
+            <li>🎤 التأكد من عمل الميكروفون</li>
+            <li>📜 الالتزام بقوانين السيرفر</li>
+          </ul>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid #cfd8e3;padding:20px;text-align:center;color:#5b7890;font-size:18px;">
+        © 2026 ${BOT_NAME}
+      </div>
+    </div>
+  </div>`;
+}
+
+function buildRejectEmailHtml(username, reason) {
+  return `
+  <div style="font-family:Arial,sans-serif;background:#edf0f5;padding:20px;direction:rtl;text-align:right;">
+    <div style="max-width:700px;margin:auto;background:#f5f7fb;border-radius:18px;overflow:hidden;border:1px solid #cfd8e3;">
+      <div style="background:#f4d7d7;padding:30px;text-align:center;border-bottom:4px solid #c04848;">
+        <img src="${SERVER_LOGO}" alt="logo" width="180" style="border-radius:50%;display:block;margin:auto;">
+        <h1 style="margin:20px 0 0;color:#8a1f1f;font-size:48px;">❌ تم رفض الطلب</h1>
+        <div style="margin-top:18px;font-size:28px;font-weight:bold;color:#163a52;">${BOT_NAME}</div>
+      </div>
+
+      <div style="padding:35px 40px;color:#33566a;font-size:22px;line-height:2;">
+        <p>مرحبًا <strong style="color:#8a1f1f;">${username}</strong>،</p>
+        <p>لم يتم قبول طلبك هذه المرة داخل <strong>${BOT_NAME}</strong>.</p>
+
+        <div style="background:#fdeaea;border-radius:18px;padding:25px;margin:25px 0;border-right:8px solid #c04848;">
+          <h2 style="margin-top:0;color:#8a1f1f;">📄 سبب الرفض</h2>
+          <div style="font-size:21px;color:#5c3636;">${reason}</div>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid #cfd8e3;padding:20px;text-align:center;color:#5b7890;font-size:18px;">
+        © 2026 ${BOT_NAME}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* =========================
+   Panel builders
+========================= */
+
+function buildWelcomeEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x2B2D31)
+    .setTitle(`👋 مرحبًا بك في ${BOT_NAME}`)
+    .setDescription(
+      `مرحبًا بك في سيرفر **${BOT_NAME}** 🌆\n\n` +
+      `يرجى قراءة القوانين أولًا قبل التفاعل داخل السيرفر.`
+    )
+    .setFooter({ text: BOT_FOOTER });
 }
 
 function buildRulesButtonRow(guildId) {
@@ -334,31 +408,19 @@ function buildRulesButtonRow(guildId) {
   );
 }
 
-function buildWelcomeEmbed() {
-  return new EmbedBuilder()
-    .setColor(0x2B2D31)
-    .setTitle(`👋 مرحبًا بك في ${BOT_NAME}`)
-    .setDescription(
-      `مرحبًا بك في سيرفر **${BOT_NAME}** 🌆\n\n` +
-      `نتمنى لك وقتًا ممتعًا معنا.\n` +
-      `يرجى قراءة القوانين أولًا قبل التفاعل داخل السيرفر.`
-    )
-    .setFooter({ text: BOT_FOOTER });
-}
-
 function buildTicketsPanelEmbed() {
   return new EmbedBuilder()
     .setColor(0x5865F2)
     .setTitle('🎫 نظام التذاكر')
     .setDescription(
       `اختر نوع التذكرة المناسب من الأزرار بالأسفل.\n\n` +
-      `كل نوع تذكرة يفتح في **كاتيجوري مختلفة** تلقائيًا.\n` +
-      `يمكنك أيضًا التقديم للإدارة من نفس البانل.`
+      `كل نوع يفتح في كاتيجوري مختلفة.\n` +
+      `ويمكنك أيضًا التقديم للإدارة من نفس البانل.`
     )
     .setFooter({ text: BOT_FOOTER });
 }
 
-function buttonOrDisabled(customId, label, emoji, style, enabled = true) {
+function ticketButton(customId, label, emoji, style, enabled) {
   return new ButtonBuilder()
     .setCustomId(customId)
     .setLabel(label)
@@ -370,22 +432,24 @@ function buttonOrDisabled(customId, label, emoji, style, enabled = true) {
 function buildTicketsPanelRows() {
   const b = dataStore.system.buttons;
 
-  const row1 = new ActionRowBuilder().addComponents(
-    buttonOrDisabled('ticket_support', 'دعم فني', '🎫', ButtonStyle.Primary, b.ticket_support),
-    buttonOrDisabled('ticket_report', 'إبلاغ', '🚨', ButtonStyle.Danger, b.ticket_report),
-    buttonOrDisabled('ticket_question', 'استفسار', '❓', ButtonStyle.Secondary, b.ticket_question)
-  );
-
-  const row2 = new ActionRowBuilder().addComponents(
-    buttonOrDisabled('ticket_suggestion', 'اقتراح', '💡', ButtonStyle.Success, b.ticket_suggestion),
-    buttonOrDisabled('ticket_partnership', 'شراكة', '🤝', ButtonStyle.Primary, b.ticket_partnership)
-  );
-
-  const row3 = new ActionRowBuilder().addComponents(
-    buttonOrDisabled('apply_admin', '📋 تقديم للإدارة', '📋', ButtonStyle.Secondary, b.apply_admin)
-  );
-
-  return [row1, row2, row3];
+  return [
+    new ActionRowBuilder().addComponents(
+      ticketButton('ticket_support', 'دعم فني', '🎫', ButtonStyle.Primary, b.ticket_support),
+      ticketButton('ticket_report', 'إبلاغ', '🚨', ButtonStyle.Danger, b.ticket_report),
+      ticketButton('ticket_question', 'استفسار', '❓', ButtonStyle.Secondary, b.ticket_question)
+    ),
+    new ActionRowBuilder().addComponents(
+      ticketButton('ticket_suggestion', 'اقتراح', '💡', ButtonStyle.Success, b.ticket_suggestion),
+      ticketButton('ticket_partnership', 'شراكة', '🤝', ButtonStyle.Primary, b.ticket_partnership)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('apply_admin')
+        .setLabel('📋 تقديم للإدارة')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!b.apply_admin)
+    )
+  ];
 }
 
 function buildDecisionPanelEmbed() {
@@ -393,8 +457,7 @@ function buildDecisionPanelEmbed() {
     .setColor(0x2B2D31)
     .setTitle('📢 قرارات الإدارة')
     .setDescription(
-      `هذا القسم مخصص للإدارة لإرسال الرسائل إلى جميع أعضاء السيرفر.\n\n` +
-      `عند الضغط على الزر، ستكتب الرسالة مرة واحدة، ثم يقوم البوت بإرسالها **لكل الأعضاء** في الخاص، مع كتابة اسم كل عضو داخل رسالته تلقائيًا.`
+      `هذا القسم مخصص للإدارة لإرسال رسالة لجميع الأعضاء في الخاص.`
     )
     .setFooter({ text: BOT_FOOTER });
 }
@@ -413,24 +476,22 @@ function buildDashboardEmbed() {
 
   return new EmbedBuilder()
     .setColor(0x5865F2)
-    .setTitle('⚙️ لوحة التحكم المتقدمة')
+    .setTitle('⚙️ لوحة التحكم')
     .setDescription(
-      `🎫 حالة التذاكر العامة: ${dataStore.system.tickets ? '🟢 شغال' : '🔴 متوقف'}\n` +
-      `📋 حالة التقديمات العامة: ${dataStore.system.applications ? '🟢 شغال' : '🔴 متوقف'}\n\n` +
-
-      `**أزرار التذاكر:**\n` +
-      `🎫 دعم فني: ${b.ticket_support ? '🟢' : '🔴'}\n` +
+      `🎫 التذاكر العامة: ${dataStore.system.tickets ? '🟢 شغال' : '🔴 متوقف'}\n` +
+      `📋 التقديمات العامة: ${dataStore.system.applications ? '🟢 شغال' : '🔴 متوقف'}\n\n` +
+      `**أزرار التذاكر**\n` +
+      `🎫 دعم: ${b.ticket_support ? '🟢' : '🔴'}\n` +
       `🚨 إبلاغ: ${b.ticket_report ? '🟢' : '🔴'}\n` +
       `❓ استفسار: ${b.ticket_question ? '🟢' : '🔴'}\n` +
       `💡 اقتراح: ${b.ticket_suggestion ? '🟢' : '🔴'}\n` +
       `🤝 شراكة: ${b.ticket_partnership ? '🟢' : '🔴'}\n` +
       `📋 تقديم إدارة: ${b.apply_admin ? '🟢' : '🔴'}\n\n` +
-
-      `**أزرار التقديمات:**\n` +
+      `**أزرار التقديمات**\n` +
       `✅ قبول: ${b.accept_application ? '🟢' : '🔴'}\n` +
       `❌ رفض: ${b.reject_application ? '🟢' : '🔴'}\n` +
       `📅 تحديد موعد: ${b.set_appointment ? '🟢' : '🔴'}\n` +
-      `🔄 تجديد الموعد: ${b.renew_appointment ? '🟢' : '🔴'}`
+      `🔄 تجديد موعد: ${b.renew_appointment ? '🟢' : '🔴'}`
     )
     .setFooter({ text: BOT_FOOTER });
 }
@@ -438,63 +499,24 @@ function buildDashboardEmbed() {
 function buildDashboardButtons() {
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('toggle_tickets')
-        .setLabel('التذاكر العامة')
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId('toggle_apps')
-        .setLabel('التقديمات العامة')
-        .setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('toggle_tickets').setLabel('التذاكر العامة').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('toggle_apps').setLabel('التقديمات العامة').setStyle(ButtonStyle.Secondary)
     ),
-
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('toggle_ticket_support')
-        .setLabel('دعم')
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId('toggle_ticket_report')
-        .setLabel('إبلاغ')
-        .setStyle(ButtonStyle.Danger),
-      new ButtonBuilder()
-        .setCustomId('toggle_ticket_question')
-        .setLabel('استفسار')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId('toggle_ticket_suggestion')
-        .setLabel('اقتراح')
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId('toggle_ticket_partnership')
-        .setLabel('شراكة')
-        .setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId('toggle_ticket_support').setLabel('دعم').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('toggle_ticket_report').setLabel('إبلاغ').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('toggle_ticket_question').setLabel('استفسار').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('toggle_ticket_suggestion').setLabel('اقتراح').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('toggle_ticket_partnership').setLabel('شراكة').setStyle(ButtonStyle.Primary)
     ),
-
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('toggle_apply_admin')
-        .setLabel('تقديم إدارة')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId('toggle_accept_application')
-        .setLabel('قبول')
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId('toggle_reject_application')
-        .setLabel('رفض')
-        .setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('toggle_apply_admin').setLabel('تقديم').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('toggle_accept_application').setLabel('قبول').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('toggle_reject_application').setLabel('رفض').setStyle(ButtonStyle.Danger)
     ),
-
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('toggle_set_appointment')
-        .setLabel('تحديد موعد')
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId('toggle_renew_appointment')
-        .setLabel('تجديد موعد')
-        .setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('toggle_set_appointment').setLabel('تحديد موعد').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('toggle_renew_appointment').setLabel('تجديد موعد').setStyle(ButtonStyle.Secondary)
     )
   ];
 }
@@ -586,151 +608,18 @@ function buildFinalApplicationActionRow(accepted = false) {
 function buildRatingRow(ticketId) {
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`rate_${ticketId}_1`)
-        .setLabel('⭐')
-        .setStyle(ButtonStyle.Danger),
-      new ButtonBuilder()
-        .setCustomId(`rate_${ticketId}_2`)
-        .setLabel('⭐⭐')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(`rate_${ticketId}_3`)
-        .setLabel('⭐⭐⭐')
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(`rate_${ticketId}_4`)
-        .setLabel('⭐⭐⭐⭐')
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`rate_${ticketId}_5`)
-        .setLabel('⭐⭐⭐⭐⭐')
-        .setStyle(ButtonStyle.Success)
+      new ButtonBuilder().setCustomId(`rate_${ticketId}_1`).setLabel('⭐').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`rate_${ticketId}_2`).setLabel('⭐⭐').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`rate_${ticketId}_3`).setLabel('⭐⭐⭐').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`rate_${ticketId}_4`).setLabel('⭐⭐⭐⭐').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`rate_${ticketId}_5`).setLabel('⭐⭐⭐⭐⭐').setStyle(ButtonStyle.Success)
     )
   ];
 }
 
-function buildAcceptEmailHtml(username, appointmentText) {
-  return `
-  <div style="font-family:Arial,sans-serif;background:#edf0f5;padding:20px;direction:rtl;text-align:right;">
-    <div style="max-width:700px;margin:auto;background:#f5f7fb;border-radius:18px;overflow:hidden;border:1px solid #cfd8e3;">
-      <div style="background:#cfeaf5;padding:30px;text-align:center;border-bottom:4px solid #4f91ad;">
-        <img src="${SERVER_LOGO}" alt="logo" width="180" style="border-radius:50%;display:block;margin:auto;">
-        <h1 style="margin:20px 0 0;color:#0d617f;font-size:52px;">🎉 تم قبول طلبك!</h1>
-        <div style="margin-top:18px;font-size:30px;font-weight:bold;color:#163a52;">
-          <span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span>
-        </div>
-      </div>
-
-      <div style="padding:35px 40px;color:#33566a;font-size:22px;line-height:2;">
-        <p>مرحبًا <strong style="color:#0d617f;">${username}</strong>،</p>
-        <p>
-          نود إعلامك بأن طلبك للانضمام إلى
-          <strong><span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span></strong>
-          قد تم قبوله بنجاح 🎊
-        </p>
-
-        <div style="background:#d9eef7;border-radius:18px;padding:25px;margin:25px 0;border-right:8px solid #0d617f;">
-          <h2 style="margin-top:0;color:#0d617f;">📅 موعد المقابلة الصوتية</h2>
-          <div style="font-size:21px;color:#355667;">
-            ${appointmentText || 'سيتم تحديد الموعد قريبًا.'}
-          </div>
-        </div>
-
-        <div style="background:#eef4fb;border:1px solid #c9d6e4;border-radius:18px;padding:25px;">
-          <h2 style="margin-top:0;color:#0d617f;">📋 الخطوات التالية:</h2>
-          <ul style="padding-right:20px;line-height:2;">
-            <li>🎙️ إجراء المقابلة الصوتية مع الإدارة</li>
-            <li>📌 التأكد من تواجدك في الوقت المحدد</li>
-            <li>🎤 التأكد من أن الميكروفون يعمل بشكل صحيح</li>
-            <li>📜 الالتزام بقوانين السيرفر</li>
-          </ul>
-        </div>
-
-        <p style="text-align:center;margin-top:30px;font-size:24px;">
-          🚀 نتمنى لك تجربة ممتعة معنا
-        </p>
-      </div>
-
-      <div style="border-top:1px solid #cfd8e3;padding:20px;text-align:center;color:#5b7890;font-size:18px;">
-        <strong><span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span></strong>
-        — هذا إيميل تلقائي من
-        <br>© 2026 ${SERVER_NAME}. جميع الحقوق محفوظة.
-      </div>
-    </div>
-  </div>
-  `;
-}
-
-function buildRejectEmailHtml(username, reason) {
-  return `
-  <div style="font-family:Arial,sans-serif;background:#edf0f5;padding:20px;direction:rtl;text-align:right;">
-    <div style="max-width:700px;margin:auto;background:#f5f7fb;border-radius:18px;overflow:hidden;border:1px solid #cfd8e3;">
-      <div style="background:#f4d7d7;padding:30px;text-align:center;border-bottom:4px solid #c04848;">
-        <img src="${SERVER_LOGO}" alt="logo" width="180" style="border-radius:50%;display:block;margin:auto;">
-        <h1 style="margin:20px 0 0;color:#8a1f1f;font-size:52px;">❌ تم رفض الطلب</h1>
-        <div style="margin-top:18px;font-size:30px;font-weight:bold;color:#163a52;">
-          <span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span>
-        </div>
-      </div>
-
-      <div style="padding:35px 40px;color:#33566a;font-size:22px;line-height:2;">
-        <p>مرحبًا <strong style="color:#8a1f1f;">${username}</strong>،</p>
-        <p>
-          نود إعلامك بأن طلبك للانضمام إلى
-          <strong><span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span></strong>
-          لم يتم قبوله هذه المرة.
-        </p>
-
-        <div style="background:#fdeaea;border-radius:18px;padding:25px;margin:25px 0;border-right:8px solid #c04848;">
-          <h2 style="margin-top:0;color:#8a1f1f;">📄 سبب الرفض</h2>
-          <div style="font-size:21px;color:#5c3636;">
-            ${reason}
-          </div>
-        </div>
-
-        <p style="text-align:center;margin-top:30px;font-size:22px;">
-          يمكنك التقديم مرة أخرى لاحقًا بعد تحسين الطلب.
-        </p>
-      </div>
-
-      <div style="border-top:1px solid #cfd8e3;padding:20px;text-align:center;color:#5b7890;font-size:18px;">
-        <strong><span style="background:#f3d77a;padding:2px 8px;">${SERVER_NAME}</span></strong>
-        — هذا إيميل تلقائي من
-        <br>© 2026 ${SERVER_NAME}. جميع الحقوق محفوظة.
-      </div>
-    </div>
-  </div>
-  `;
-}
-
-function buildAcceptedEmbed(applicantId, staffTag, appointment) {
-  return new EmbedBuilder()
-    .setColor(0x57F287)
-    .setTitle('🎉 تم قبول الطلب')
-    .setThumbnail(SERVER_LOGO)
-    .setDescription(
-      `تم قبول المتقدم بنجاح ✅\n\n` +
-      `👤 **المتقدم:** <@${applicantId}>\n` +
-      `📅 **موعد المقابلة الصوتية:** ${appointment || 'سيتم تحديده قريبًا'}\n` +
-      `🛡️ **تم بواسطة:** ${staffTag}`
-    )
-    .setFooter({ text: BOT_FOOTER });
-}
-
-function buildRejectedEmbed(applicantId, staffTag, reason) {
-  return new EmbedBuilder()
-    .setColor(0xED4245)
-    .setTitle('❌ تم رفض الطلب')
-    .setThumbnail(SERVER_LOGO)
-    .setDescription(
-      `تم رفض المتقدم\n\n` +
-      `👤 **المتقدم:** <@${applicantId}>\n` +
-      `📄 **سبب الرفض:** ${reason}\n` +
-      `🛡️ **تم بواسطة:** ${staffTag}`
-    )
-    .setFooter({ text: BOT_FOOTER });
-}
+/* =========================
+   Panels
+========================= */
 
 async function panelExists(channel, title) {
   try {
@@ -746,43 +635,9 @@ async function panelExists(channel, title) {
   }
 }
 
-function parseTicketTopic(topic) {
-  if (!topic) return {};
-  const ownerMatch = topic.match(/OWNER:(\d+)/);
-  const typeMatch = topic.match(/TYPE:([a-z_]+)/);
-  const idMatch = topic.match(/ID:(\d+)/);
-
-  return {
-    ownerId: ownerMatch ? ownerMatch[1] : null,
-    ticketType: typeMatch ? typeMatch[1] : null,
-    ticketId: idMatch ? idMatch[1] : null
-  };
-}
-
-function getTicketTypeLabel(typeKey) {
-  return TICKET_TYPES[typeKey]?.label || typeKey || 'غير معروف';
-}
-
-async function createTranscript(channel) {
-  const fetched = await channel.messages.fetch({ limit: 100 });
-  const messages = [...fetched.values()].reverse();
-
-  let content = `Transcript for #${channel.name}\nGenerated at: ${new Date().toISOString()}\n`;
-  content += '============================================================\n\n';
-
-  for (const msg of messages) {
-    const date = new Date(msg.createdTimestamp).toLocaleString('en-US');
-    const line = `[${date}] ${msg.author.tag}: ${msg.content || '[embed/attachment]'}\n`;
-    content += line;
-  }
-
-  return Buffer.from(content, 'utf-8');
-}
-
 async function sendWelcomePanel() {
   const welcomeChannel = await fetchChannel(WELCOME_CHANNEL_ID);
   if (!welcomeChannel) return;
-
   const exists = await panelExists(welcomeChannel, `👋 مرحبًا بك في ${BOT_NAME}`);
   if (exists) return;
 
@@ -795,7 +650,6 @@ async function sendWelcomePanel() {
 async function sendTicketsPanel() {
   const ticketsChannel = await fetchChannel(TICKETS_PANEL_CHANNEL_ID);
   if (!ticketsChannel) return;
-
   const exists = await panelExists(ticketsChannel, '🎫 نظام التذاكر');
   if (exists) return;
 
@@ -824,7 +678,7 @@ async function refreshTicketsPanel() {
         components: buildTicketsPanelRows()
       });
     }
-  } catch (err) {
+  } catch {
     console.log('❌ Failed to refresh tickets panel');
   }
 }
@@ -832,7 +686,6 @@ async function refreshTicketsPanel() {
 async function sendDecisionPanel() {
   const decisionChannel = await fetchChannel(DECISION_CHANNEL_ID);
   if (!decisionChannel) return;
-
   const exists = await panelExists(decisionChannel, '📢 قرارات الإدارة');
   if (exists) return;
 
@@ -841,6 +694,10 @@ async function sendDecisionPanel() {
     components: [buildDecisionPanelRow()]
   }).catch(() => {});
 }
+
+/* =========================
+   Slash Commands
+========================= */
 
 async function registerSlashCommands() {
   const commands = [
@@ -861,27 +718,30 @@ async function registerSlashCommands() {
 
     new SlashCommandBuilder()
       .setName('panel-decisions')
-      .setDescription('إرسال لوحة قرارات الإدارة')
+      .setDescription('إرسال لوحة القرارات')
       .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator),
 
     new SlashCommandBuilder()
       .setName('dashboard')
-      .setDescription('لوحة التحكم المتقدمة')
+      .setDescription('لوحة التحكم')
       .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator)
   ].map((cmd) => cmd.toJSON());
 
   const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
   try {
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      { body: commands }
-    );
+    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
+      body: commands
+    });
     console.log('✅ Slash commands registered');
   } catch (error) {
     console.error('❌ Slash command registration error:', error);
   }
 }
+
+/* =========================
+   Admin application
+========================= */
 
 async function startAdminApplication(interaction) {
   const user = interaction.user;
@@ -903,12 +763,7 @@ async function startAdminApplication(interaction) {
   const filter = (m) => m.author.id === user.id;
 
   const questions = [
-    {
-      key: 'full_name',
-      question: '📌 ما الاسم الكامل؟',
-      minWords: 2,
-      shortError: '❌ تم رفض التقديم: الاسم الكامل قصير جدًا.'
-    },
+    { key: 'full_name', question: '📌 ما الاسم الكامل؟', minWords: 2, shortError: '❌ الاسم الكامل قصير جدًا.' },
     {
       key: 'email',
       question: '📧 ما هو البريد الإلكتروني الخاص بك؟',
@@ -922,59 +777,19 @@ async function startAdminApplication(interaction) {
       question: '🎂 كم عمرك؟',
       validate(answer) {
         const age = parseInt(answer, 10);
-        if (Number.isNaN(age)) return '❌ تم رفض التقديم: العمر يجب أن يكون رقمًا.';
-        if (age < 18) return '❌ تم رفض التقديم: تحت السن المطلوب (18+).';
+        if (Number.isNaN(age)) return '❌ العمر يجب أن يكون رقمًا.';
+        if (age < 18) return '❌ تحت السن المطلوب (18+).';
         return null;
       }
     },
-    {
-      key: 'country_city',
-      question: '🌍 من أي دولة / مدينة؟',
-      minWords: 2,
-      shortError: '❌ تم رفض التقديم: الإجابة صغيرة عن الإجابة المطلوبة.'
-    },
-    {
-      key: 'hours',
-      question: '⏰ كم ساعة تقدر تتواجد يوميًا؟',
-      minWords: 2,
-      shortError: '❌ تم رفض التقديم: الإجابة صغيرة عن الإجابة المطلوبة.'
-    },
-    {
-      key: 'experience',
-      question: '🧠 ما خبرتك السابقة في الإدارة؟',
-      minWords: 4,
-      shortError: '❌ تم رفض التقديم: الإجابة صغيرة عن الإجابة المطلوبة.'
-    },
-    {
-      key: 'why_admin',
-      question: '📋 لماذا تريد الانضمام للإدارة؟',
-      minWords: 4,
-      shortError: '❌ تم رفض التقديم: الإجابة صغيرة عن الإجابة المطلوبة.'
-    },
-    {
-      key: 'problem_handling',
-      question: '🛠️ كيف تتعامل مع المشاكل أو الخلافات؟',
-      minWords: 4,
-      shortError: '❌ تم رفض التقديم: الإجابة صغيرة عن الإجابة المطلوبة.'
-    },
-    {
-      key: 'special',
-      question: '⭐ ما الذي يميزك عن غيرك؟',
-      minWords: 4,
-      shortError: '❌ تم رفض التقديم: الإجابة صغيرة عن الإجابة المطلوبة.'
-    },
-    {
-      key: 'server_rules',
-      question: '📚 هل قرأت قوانين السيرفر وتفهمها؟ اشرح بشكل مختصر.',
-      minWords: 4,
-      shortError: '❌ تم رفض التقديم: الإجابة صغيرة عن الإجابة المطلوبة.'
-    },
-    {
-      key: 'activity_days',
-      question: '📅 في أي أيام تكون متواجد أكثر؟',
-      minWords: 2,
-      shortError: '❌ تم رفض التقديم: الإجابة صغيرة عن الإجابة المطلوبة.'
-    }
+    { key: 'country_city', question: '🌍 من أي دولة / مدينة؟', minWords: 2, shortError: '❌ الإجابة قصيرة.' },
+    { key: 'hours', question: '⏰ كم ساعة تقدر تتواجد يوميًا؟', minWords: 2, shortError: '❌ الإجابة قصيرة.' },
+    { key: 'experience', question: '🧠 ما خبرتك السابقة في الإدارة؟', minWords: 4, shortError: '❌ الإجابة قصيرة.' },
+    { key: 'why_admin', question: '📋 لماذا تريد الانضمام للإدارة؟', minWords: 4, shortError: '❌ الإجابة قصيرة.' },
+    { key: 'problem_handling', question: '🛠️ كيف تتعامل مع المشاكل أو الخلافات؟', minWords: 4, shortError: '❌ الإجابة قصيرة.' },
+    { key: 'special', question: '⭐ ما الذي يميزك عن غيرك؟', minWords: 4, shortError: '❌ الإجابة قصيرة.' },
+    { key: 'server_rules', question: '📚 هل قرأت قوانين السيرفر وتفهمها؟ اشرح بشكل مختصر.', minWords: 4, shortError: '❌ الإجابة قصيرة.' },
+    { key: 'activity_days', question: '📅 في أي أيام تكون متواجد أكثر؟', minWords: 2, shortError: '❌ الإجابة قصيرة.' }
   ];
 
   const answers = {};
@@ -982,8 +797,7 @@ async function startAdminApplication(interaction) {
   try {
     await dm.send(
       `📋 **بدأ التقديم على الإدارة**\n\n` +
-      `سيتم سؤالك سؤالًا واحدًا في كل مرة.\n` +
-      `إذا كان العمر أقل من 18 أو الإيميل غير صحيح أو الإجابات قصيرة جدًا سيتم رفض التقديم تلقائيًا.`
+      `سيتم سؤالك سؤالًا واحدًا في كل مرة.`
     );
 
     for (const q of questions) {
@@ -999,37 +813,33 @@ async function startAdminApplication(interaction) {
       const answer = collected.first().content.trim();
 
       if (q.validate) {
-        const validationError = q.validate(answer);
-        if (validationError) {
-          await dm.send(validationError);
-
-          const autoRejectEmbed = new EmbedBuilder()
-            .setColor(0xED4245)
-            .setTitle('❌ تم رفض تقديم تلقائيًا')
-            .setDescription(
-              `**المتقدم:** ${user.tag}\n` +
-              `**السبب:** ${validationError}`
-            )
-            .setFooter({ text: BOT_FOOTER });
-
-          await reviewChannel.send({ embeds: [autoRejectEmbed] }).catch(() => {});
+        const err = q.validate(answer);
+        if (err) {
+          await dm.send(`❌ ${err}`);
+          await reviewChannel.send({
+            embeds: [
+              new EmbedBuilder()
+                .setColor(0xED4245)
+                .setTitle('❌ تم رفض تقديم تلقائيًا')
+                .setDescription(`**المتقدم:** ${user.tag}\n**السبب:** ${err}`)
+                .setFooter({ text: BOT_FOOTER })
+            ]
+          }).catch(() => {});
           return;
         }
       }
 
       if (q.minWords && countWords(answer) < q.minWords) {
-        await dm.send(q.shortError || '❌ تم رفض التقديم: الإجابة قصيرة جدًا.');
-
-        const autoRejectEmbed = new EmbedBuilder()
-          .setColor(0xED4245)
-          .setTitle('❌ تم رفض تقديم تلقائيًا')
-          .setDescription(
-            `**المتقدم:** ${user.tag}\n` +
-            `**السبب:** ${q.shortError || 'الإجابة قصيرة جدًا.'}`
-          )
-          .setFooter({ text: BOT_FOOTER });
-
-        await reviewChannel.send({ embeds: [autoRejectEmbed] }).catch(() => {});
+        await dm.send(q.shortError);
+        await reviewChannel.send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xED4245)
+              .setTitle('❌ تم رفض تقديم تلقائيًا')
+              .setDescription(`**المتقدم:** ${user.tag}\n**السبب:** ${q.shortError}`)
+              .setFooter({ text: BOT_FOOTER })
+          ]
+        }).catch(() => {});
         return;
       }
 
@@ -1056,10 +866,7 @@ async function startAdminApplication(interaction) {
     const reviewEmbed = new EmbedBuilder()
       .setColor(0x5865F2)
       .setTitle('📋 تقديم جديد للإدارة')
-      .setDescription(
-        `**المتقدم:** ${user.tag}\n` +
-        `**User ID:** ${user.id}`
-      )
+      .setDescription(`**المتقدم:** ${user.tag}\n**User ID:** ${user.id}`)
       .addFields(
         { name: 'الاسم الكامل', value: answers.full_name || 'غير موجود' },
         { name: 'البريد الإلكتروني', value: answers.email || 'غير موجود' },
@@ -1083,8 +890,8 @@ async function startAdminApplication(interaction) {
 
     await dm.send('✅ تم إرسال تقديمك إلى الإدارة بنجاح.');
     await sendLog(`📋 تم إرسال تقديم إدارة جديد بواسطة ${user.tag}`);
-  } catch (err) {
-    await dm.send('❌ انتهى وقت التقديم أو حدث خطأ أثناء جمع الإجابات.').catch(() => {});
+  } catch {
+    await dm.send('❌ انتهى وقت التقديم أو حدث خطأ.').catch(() => {});
   }
 }
 
@@ -1094,17 +901,15 @@ async function startAdminApplication(interaction) {
 
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-
   await registerSlashCommands();
   await sendWelcomePanel();
   await sendTicketsPanel();
   await sendDecisionPanel();
-
-  await sendLog('✅ تم تشغيل البوت وإرسال/التحقق من كل اللوحات.');
+  await sendLog('✅ تم تشغيل البوت.');
 });
 
 /* =========================
-   عضو جديد
+   New member
 ========================= */
 
 client.on(Events.GuildMemberAdd, async (member) => {
@@ -1112,7 +917,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
 
   try {
     await member.roles.add(PLAYER_ROLE_ID);
-  } catch (err) {
+  } catch {
     console.log('❌ فشل إعطاء رول Player');
   }
 
@@ -1123,8 +928,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
     .setTitle('✨ عضو جديد')
     .setDescription(
       `مرحبًا بك ${member} في **${BOT_NAME}** 🌆\n\n` +
-      `تم إعطاؤك رتبة Player 🎮\n` +
-      `يرجى قراءة القوانين أولًا ثم استمتع بوقتك معنا 💙`
+      `تم إعطاؤك رتبة Player 🎮`
     )
     .setFooter({ text: BOT_FOOTER });
 
@@ -1135,53 +939,37 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 /* =========================
-   InteractionCreate
+   Interactions
 ========================= */
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
-    /* ===== Slash Commands ===== */
+    /* ===== Slash ===== */
     if (interaction.isChatInputCommand()) {
       if (!isAdmin(interaction.member)) {
-        return interaction.reply({
-          content: '❌ هذا الأمر للإدارة فقط.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ هذا الأمر للإدارة فقط.', ephemeral: true });
       }
 
       if (interaction.commandName === 'setup') {
         await sendWelcomePanel();
         await sendTicketsPanel();
         await sendDecisionPanel();
-
-        return interaction.reply({
-          content: '✅ تم إرسال كل اللوحات أو التحقق من وجودها.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '✅ تم إرسال كل اللوحات.', ephemeral: true });
       }
 
       if (interaction.commandName === 'panel-welcome') {
         await sendWelcomePanel();
-        return interaction.reply({
-          content: '✅ تم إرسال لوحة الترحيب أو كانت موجودة بالفعل.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '✅ تم إرسال لوحة الترحيب.', ephemeral: true });
       }
 
       if (interaction.commandName === 'panel-tickets') {
         await sendTicketsPanel();
-        return interaction.reply({
-          content: '✅ تم إرسال لوحة التذاكر أو كانت موجودة بالفعل.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '✅ تم إرسال لوحة التذاكر.', ephemeral: true });
       }
 
       if (interaction.commandName === 'panel-decisions') {
         await sendDecisionPanel();
-        return interaction.reply({
-          content: '✅ تم إرسال لوحة القرارات أو كانت موجودة بالفعل.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '✅ تم إرسال لوحة القرارات.', ephemeral: true });
       }
 
       if (interaction.commandName === 'dashboard') {
@@ -1193,8 +981,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    /* ===== Dashboard Buttons ===== */
-    const dashboardButtonMap = {
+    /* ===== Dashboard ===== */
+    const dashboardMap = {
       toggle_ticket_support: 'ticket_support',
       toggle_ticket_report: 'ticket_report',
       toggle_ticket_question: 'ticket_question',
@@ -1208,75 +996,43 @@ client.on(Events.InteractionCreate, async (interaction) => {
     };
 
     if (interaction.isButton() && interaction.customId === 'toggle_tickets') {
-      if (!isAdmin(interaction.member)) {
-        return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
-      }
-
+      if (!isAdmin(interaction.member)) return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
       dataStore.system.tickets = !dataStore.system.tickets;
       saveData(dataStore);
       await refreshTicketsPanel();
-
-      return interaction.update({
-        embeds: [buildDashboardEmbed()],
-        components: buildDashboardButtons()
-      });
+      return interaction.update({ embeds: [buildDashboardEmbed()], components: buildDashboardButtons() });
     }
 
     if (interaction.isButton() && interaction.customId === 'toggle_apps') {
-      if (!isAdmin(interaction.member)) {
-        return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
-      }
-
+      if (!isAdmin(interaction.member)) return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
       dataStore.system.applications = !dataStore.system.applications;
       saveData(dataStore);
       await refreshTicketsPanel();
-
-      return interaction.update({
-        embeds: [buildDashboardEmbed()],
-        components: buildDashboardButtons()
-      });
+      return interaction.update({ embeds: [buildDashboardEmbed()], components: buildDashboardButtons() });
     }
 
-    if (interaction.isButton() && dashboardButtonMap[interaction.customId]) {
-      if (!isAdmin(interaction.member)) {
-        return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
-      }
-
-      toggleButtonSetting(dashboardButtonMap[interaction.customId]);
+    if (interaction.isButton() && dashboardMap[interaction.customId]) {
+      if (!isAdmin(interaction.member)) return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
+      toggleButtonSetting(dashboardMap[interaction.customId]);
       await refreshTicketsPanel();
-
-      return interaction.update({
-        embeds: [buildDashboardEmbed()],
-        components: buildDashboardButtons()
-      });
+      return interaction.update({ embeds: [buildDashboardEmbed()], components: buildDashboardButtons() });
     }
 
-    /* ===== تقديم للإدارة ===== */
+    /* ===== Start application ===== */
     if (interaction.isButton() && interaction.customId === 'apply_admin') {
       if (!dataStore.system.applications || !isButtonEnabled('apply_admin')) {
-        return interaction.reply({
-          content: '❌ التقديمات متوقفة حالياً.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ التقديمات متوقفة حالياً.', ephemeral: true });
       }
-
       return startAdminApplication(interaction);
     }
 
-    /* ===== فتح التذاكر ===== */
+    /* ===== Open ticket ===== */
     if (interaction.isButton() && TICKET_TYPES[interaction.customId]) {
       if (!dataStore.system.tickets) {
-        return interaction.reply({
-          content: '❌ نظام التذاكر متوقف حالياً.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ نظام التذاكر متوقف حالياً.', ephemeral: true });
       }
-
       if (!isButtonEnabled(interaction.customId)) {
-        return interaction.reply({
-          content: '❌ هذا الزر متوقف حالياً.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ هذا الزر متوقف حالياً.', ephemeral: true });
       }
 
       const ticketInfo = TICKET_TYPES[interaction.customId];
@@ -1309,10 +1065,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         parent: ticketInfo.categoryId,
         topic: `OWNER:${interaction.user.id} | TYPE:${interaction.customId} | ID:${ticketId}`,
         permissionOverwrites: [
-          {
-            id: guild.id,
-            deny: [PermissionsBitField.Flags.ViewChannel]
-          },
+          { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
           {
             id: client.user.id,
             allow: [
@@ -1357,7 +1110,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setDescription(
           `مرحبًا ${interaction.user}\n\n` +
           `تم فتح تذكرتك بنجاح.\n` +
-          `يرجى كتابة التفاصيل بوضوح وسيتم الرد عليك بأقرب وقت.`
+          `يرجى كتابة التفاصيل بوضوح.`
         )
         .addFields(
           { name: 'رقم التذكرة', value: `#${ticketId}`, inline: true },
@@ -1366,19 +1119,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         )
         .setFooter({ text: BOT_FOOTER });
 
-      try {
-        await ticketChannel.send({
-          content: `${interaction.user} <@&${SUPPORT_ROLE_ID}>`,
-          embeds: [ticketEmbed],
-          components: buildTicketButtons()
-        });
-      } catch (err) {
-        console.error('❌ Error sending ticket message:', err);
-
-        await ticketChannel.send({
-          content: `❌ حصل خطأ في الرسالة الأساسية، لكن التذكرة اتفتحت يا ${interaction.user}`
-        }).catch(() => {});
-      }
+      await ticketChannel.send({
+        content: `${interaction.user} <@&${SUPPORT_ROLE_ID}>`,
+        embeds: [ticketEmbed],
+        components: buildTicketButtons()
+      }).catch(() => {});
 
       await sendLog(
         `📂 تم فتح تذكرة جديدة\n` +
@@ -1388,18 +1133,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
         `القناة: ${ticketChannel}`
       );
 
-      return interaction.editReply({
-        content: `✅ تم فتح التذكرة بنجاح: ${ticketChannel}`
-      });
+      return interaction.editReply({ content: `✅ تم فتح التذكرة بنجاح: ${ticketChannel}` });
     }
 
-    /* ===== استلام التذكرة ===== */
+    /* ===== Claim ===== */
     if (interaction.isButton() && interaction.customId === 'claim_ticket') {
       if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: '❌ فقط الإدارة أو الدعم يمكنهم استلام التذكرة.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ فقط الإدارة أو الدعم يمكنهم استلام التذكرة.', ephemeral: true });
       }
 
       const claimedBy = claimedTickets.get(interaction.channel.id);
@@ -1411,32 +1151,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       claimedTickets.set(interaction.channel.id, interaction.user.id);
-
-      await interaction.reply({
-        content: `📌 تم استلام التذكرة بواسطة ${interaction.user}`,
-        ephemeral: false
-      });
-
-      await sendLog(
-        `📌 تم استلام تذكرة\n` +
-        `القناة: ${interaction.channel.name}\n` +
-        `بواسطة: ${interaction.user.tag}`
-      );
-
+      await interaction.reply({ content: `📌 تم استلام التذكرة بواسطة ${interaction.user}` });
+      await sendLog(`📌 تم استلام تذكرة ${interaction.channel.name} بواسطة ${interaction.user.tag}`);
       return;
     }
 
     /* ===== Transcript ===== */
     if (interaction.isButton() && interaction.customId === 'transcript_ticket') {
       if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: '❌ فقط الإدارة أو الدعم يمكنهم نسخ المحادثة.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ فقط الإدارة أو الدعم يمكنهم نسخ المحادثة.', ephemeral: true });
       }
 
       await interaction.deferReply({ ephemeral: true });
-
       const buffer = await createTranscript(interaction.channel);
       const file = new AttachmentBuilder(buffer, {
         name: `${interaction.channel.name}-transcript.txt`
@@ -1447,22 +1173,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
         files: [file]
       });
 
-      await sendLog(
-        `🧾 تم إنشاء Transcript\n` +
-        `القناة: ${interaction.channel.name}\n` +
-        `بواسطة: ${interaction.user.tag}`
-      );
-
+      await sendLog(`🧾 تم إنشاء Transcript في ${interaction.channel.name} بواسطة ${interaction.user.tag}`);
       return;
     }
 
-    /* ===== زر إغلاق التذكرة ===== */
+    /* ===== Close ticket ===== */
     if (interaction.isButton() && interaction.customId === 'close_ticket') {
       if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: '❌ فقط الإدارة أو الدعم يمكنهم إغلاق التذكرة.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ فقط الإدارة أو الدعم يمكنهم إغلاق التذكرة.', ephemeral: true });
       }
 
       const modal = new ModalBuilder()
@@ -1475,28 +1193,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(true);
 
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(reasonInput)
-      );
-
+      modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
       return interaction.showModal(modal);
     }
 
-    /* ===== مودال إغلاق التذكرة ===== */
     if (interaction.isModalSubmit() && interaction.customId === 'close_ticket_modal') {
       if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: '❌ هذا الإجراء خاص بالإدارة أو الدعم.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ هذا الإجراء خاص بالإدارة أو الدعم.', ephemeral: true });
       }
 
       const reason = interaction.fields.getTextInputValue('close_reason').trim();
       const parsed = parseTicketTopic(interaction.channel.topic);
-
       const ownerId = parsed.ownerId;
       const ticketId = parsed.ticketId || 'غير معروف';
-      const ticketType = parsed.ticketType || 'غير معروف';
 
       try {
         const user = await client.users.fetch(ownerId);
@@ -1505,34 +1214,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setColor(0xED4245)
           .setTitle('🔒 تم إغلاق تذكرتك')
           .setDescription(
-            `تم إغلاق تذكرتك في سيرفر **${BOT_NAME}**\n\n` +
-            `🎫 رقم التذكرة: **#${ticketId}**\n` +
-            `📂 نوع التذكرة: **${getTicketTypeLabel(ticketType)}**\n\n` +
+            `🎫 رقم التذكرة: **#${ticketId}**\n\n` +
             `📄 السبب:\n${reason}`
           )
           .setFooter({ text: BOT_FOOTER });
 
         await user.send({ embeds: [dmEmbed] });
-
         await user.send({
           content: `⭐ قيّم تجربتك مع التذكرة #${ticketId}`,
           components: buildRatingRow(ticketId)
         });
-      } catch (err) {
-        console.log('❌ Failed to send close reason DM');
-      }
+      } catch {}
 
-      await sendLog(
-        `🔒 تم إغلاق تذكرة\n` +
-        `رقم التذكرة: #${ticketId}\n` +
-        `القناة: ${interaction.channel.name}\n` +
-        `بواسطة: ${interaction.user.tag}\n` +
-        `السبب: ${reason}`
-      );
-
-      await interaction.reply({
-        content: '🔒 سيتم حذف التذكرة خلال 5 ثوانٍ...'
-      });
+      await interaction.reply({ content: '🔒 سيتم حذف التذكرة خلال 5 ثوانٍ...' });
+      await sendLog(`🔒 تم إغلاق تذكرة #${ticketId} بواسطة ${interaction.user.tag}`);
 
       setTimeout(async () => {
         claimedTickets.delete(interaction.channel.id);
@@ -1542,7 +1237,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    /* ===== أزرار التقييم ===== */
+    /* ===== Rating ===== */
     if (interaction.isButton() && interaction.customId.startsWith('rate_')) {
       const parts = interaction.customId.split('_');
       const ticketId = parts[1];
@@ -1565,7 +1260,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.showModal(modal);
     }
 
-    /* ===== مودال التقييم ===== */
     if (interaction.isModalSubmit() && interaction.customId.startsWith('rate_reason_')) {
       const parts = interaction.customId.split('_');
       const ticketId = parts[2];
@@ -1581,33 +1275,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
             { name: 'رقم التذكرة', value: `#${ticketId}`, inline: true },
             { name: 'التقييم', value: '⭐'.repeat(Number(stars)), inline: true },
             { name: 'السبب', value: reason },
-            { name: '👤 العضو', value: interaction.user.tag }
+            { name: 'العضو', value: interaction.user.tag }
           )
           .setFooter({ text: BOT_FOOTER });
 
         await reviewChannel.send({ embeds: [reviewEmbed] }).catch(() => {});
       }
 
-      return interaction.reply({
-        content: '✅ شكراً لتقييمك.',
-        ephemeral: true
-      });
+      return interaction.reply({ content: '✅ شكراً لتقييمك.', ephemeral: true });
     }
 
-    /* ===== فتح مودال قرارات الإدارة ===== */
+    /* ===== Decisions ===== */
     if (interaction.isButton() && interaction.customId === 'open_decision_modal') {
       if (!isAdmin(interaction.member)) {
-        return interaction.reply({
-          content: '❌ هذا الزر خاص بالإدارة فقط.',
-          ephemeral: true
-        });
-      }
-
-      if (interaction.channel.id !== DECISION_CHANNEL_ID) {
-        return interaction.reply({
-          content: '❌ استخدم هذا الزر داخل قناة قرارات الإدارة فقط.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ هذا الزر خاص بالإدارة فقط.', ephemeral: true });
       }
 
       const modal = new ModalBuilder()
@@ -1620,71 +1301,46 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(true);
 
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(messageInput)
-      );
-
+      modal.addComponents(new ActionRowBuilder().addComponents(messageInput));
       return interaction.showModal(modal);
     }
 
-    /* ===== إرسال قرار للجميع ===== */
     if (interaction.isModalSubmit() && interaction.customId === 'decision_modal') {
       if (!isAdmin(interaction.member)) {
-        return interaction.reply({
-          content: '❌ هذا الإجراء خاص بالإدارة فقط.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ هذا الإجراء خاص بالإدارة فقط.', ephemeral: true });
       }
 
       const messageValue = interaction.fields.getTextInputValue('decision_message').trim();
-
-      await interaction.reply({
-        content: '📢 جاري إرسال الرسالة إلى جميع الأعضاء...',
-        ephemeral: true
-      });
+      await interaction.reply({ content: '📢 جاري إرسال الرسالة...', ephemeral: true });
 
       let success = 0;
       let failed = 0;
-
       const members = await interaction.guild.members.fetch();
 
       for (const [, member] of members) {
         if (member.user.bot) continue;
-
         try {
           const dmEmbed = new EmbedBuilder()
             .setColor(0x2B2D31)
             .setTitle(`📢 رسالة من إدارة ${BOT_NAME}`)
-            .setDescription(
-              `👋 أهلاً يا **${member.user.username}**\n\n` +
-              `${messageValue}\n\n` +
-              `━━━━━━━━━━━━━━━\n` +
-              `💬 تم إرسال هذه الرسالة لك من إدارة السيرفر.`
-            )
+            .setDescription(`👋 أهلاً يا **${member.user.username}**\n\n${messageValue}`)
             .setFooter({ text: BOT_FOOTER });
 
           await member.send({ embeds: [dmEmbed] });
           success++;
-        } catch (error) {
+        } catch {
           failed++;
         }
       }
 
-      await sendLog(
-        `📨 تم إرسال برودكاست إداري\n` +
-        `بواسطة: ${interaction.user.tag}\n` +
-        `نجح: ${success}\n` +
-        `فشل: ${failed}\n` +
-        `الرسالة: ${messageValue}`
-      );
-
+      await sendLog(`📨 Broadcast by ${interaction.user.tag} | success: ${success} | failed: ${failed}`);
       return interaction.followUp({
-        content: `✅ تم إرسال الرسالة للجميع.\nنجح: ${success}\nفشل: ${failed}`,
+        content: `✅ تم إرسال الرسالة.\nنجح: ${success}\nفشل: ${failed}`,
         ephemeral: true
       });
     }
 
-    /* ===== تحديد / تجديد الموعد ===== */
+    /* ===== Set / renew appointment ===== */
     if (
       interaction.isButton() &&
       (
@@ -1693,46 +1349,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
       )
     ) {
       if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: '❌ هذا الزر للإدارة فقط.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ هذا الزر للإدارة فقط.', ephemeral: true });
       }
 
       const applicantId = interaction.customId
         .replace('set_appointment_', '')
         .replace('renew_appointment_', '');
 
-      const isRenew = interaction.customId.startsWith('renew_appointment_');
+      const renew = interaction.customId.startsWith('renew_appointment_');
 
-      if (isRenew && !isButtonEnabled('renew_appointment')) {
-        return interaction.reply({
-          content: '❌ زر تجديد الموعد متوقف حالياً.',
-          ephemeral: true
-        });
+      if (renew && !isButtonEnabled('renew_appointment')) {
+        return interaction.reply({ content: '❌ زر تجديد الموعد متوقف حالياً.', ephemeral: true });
       }
 
-      if (!isRenew && !isButtonEnabled('set_appointment')) {
-        return interaction.reply({
-          content: '❌ زر تحديد الموعد متوقف حالياً.',
-          ephemeral: true
-        });
+      if (!renew && !isButtonEnabled('set_appointment')) {
+        return interaction.reply({ content: '❌ زر تحديد الموعد متوقف حالياً.', ephemeral: true });
       }
 
       const modal = new ModalBuilder()
-        .setCustomId(`${isRenew ? 'renew' : 'set'}_appointment_modal_${applicantId}`)
-        .setTitle(isRenew ? 'تجديد موعد المقابلة الصوتية' : 'تحديد موعد المقابلة الصوتية');
+        .setCustomId(`${renew ? 'renew' : 'set'}_appointment_modal_${applicantId}`)
+        .setTitle(renew ? 'تجديد موعد المقابلة الصوتية' : 'تحديد موعد المقابلة الصوتية');
 
-      const appointmentInput = new TextInputBuilder()
+      const input = new TextInputBuilder()
         .setCustomId('appointment_value')
-        .setLabel('اكتب موعد المقابلة الصوتية')
+        .setLabel('اكتب الموعد')
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(true);
 
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(appointmentInput)
-      );
-
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
       return interaction.showModal(modal);
     }
 
@@ -1750,27 +1394,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const appointmentValue = interaction.fields.getTextInputValue('appointment_value').trim();
       const oldData = getApplicationData(applicantId) || {};
 
-      setApplicationData(applicantId, {
-        appointment: appointmentValue
-      });
+      setApplicationData(applicantId, { appointment: appointmentValue });
 
       const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
-
-      const filteredFields = (updatedEmbed.data.fields || []).filter(
-        (field) => field.name !== 'موعد المقابلة الصوتية'
+      const fields = (updatedEmbed.data.fields || []).filter(
+        (f) => f.name !== 'موعد المقابلة الصوتية'
       );
-
-      updatedEmbed.setFields([
-        ...filteredFields,
-        { name: 'موعد المقابلة الصوتية', value: appointmentValue || 'غير موجود' }
-      ]);
+      updatedEmbed.setFields([...fields, { name: 'موعد المقابلة الصوتية', value: appointmentValue }]);
 
       await interaction.update({
         embeds: [updatedEmbed],
         components: buildApplicationActionRow(applicantId)
       });
 
-      if (oldData?.email && isValidEmail(oldData.email)) {
+      const user = await client.users.fetch(applicantId).catch(() => null);
+      if (user) {
+        await user.send(
+          `📅 **تم تحديث موعد المقابلة الصوتية**\n\n${appointmentValue}`
+        ).catch(() => {});
+      }
+
+      if (oldData.email && isValidEmail(oldData.email)) {
         await sendEmail(
           oldData.email,
           'تحديد / تجديد موعد المقابلة الصوتية',
@@ -1778,38 +1422,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         );
       }
 
-      const user = await client.users.fetch(applicantId).catch(() => null);
-      if (user) {
-        await user.send(
-          `📅 **تم ${interaction.customId.startsWith('renew_') ? 'تجديد' : 'تحديد'} موعد المقابلة الصوتية**\n\n` +
-          `${appointmentValue}`
-        ).catch(() => {});
-      }
-
-      await sendLog(
-        `📅 تم ${interaction.customId.startsWith('renew_') ? 'تجديد' : 'تحديد'} موعد مقابلة\n` +
-        `للمتقدم: ${applicantId}\n` +
-        `بواسطة: ${interaction.user.tag}\n` +
-        `الموعد: ${appointmentValue}`
-      );
-
+      await sendLog(`📅 تم تحديث موعد ${applicantId} إلى ${appointmentValue} بواسطة ${interaction.user.tag}`);
       return;
     }
 
-    /* ===== قبول التقديم ===== */
+    /* ===== Accept ===== */
     if (interaction.isButton() && interaction.customId.startsWith('accept_application_')) {
       if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: '❌ هذا الزر للإدارة فقط.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ هذا الزر للإدارة فقط.', ephemeral: true });
       }
 
       if (!isButtonEnabled('accept_application')) {
-        return interaction.reply({
-          content: '❌ زر القبول متوقف حالياً.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ زر القبول متوقف حالياً.', ephemeral: true });
       }
 
       await interaction.deferUpdate();
@@ -1818,10 +1442,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const member = await interaction.guild.members.fetch(applicantId).catch(() => null);
 
       if (!member) {
-        return interaction.followUp({
-          content: '❌ لم أجد العضو داخل السيرفر.',
-          ephemeral: true
-        });
+        return interaction.followUp({ content: '❌ لم أجد العضو داخل السيرفر.', ephemeral: true });
       }
 
       const appData = getApplicationData(applicantId) || {};
@@ -1830,53 +1451,57 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await member.roles.add(roleId).catch(() => {});
       }
 
-      await member.send(
-        `✅ **تم قبولك في الإدارة**\n\n` +
-        `مبروك، تم قبول طلبك في سيرفر **${BOT_NAME}**.\n\n` +
-        `📅 موعد المقابلة الصوتية:\n${appData.appointment || 'سيتم تحديده قريبًا.'}`
-      ).catch(() => {});
+      const acceptedDM = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle('🎉 تم قبولك في الإدارة')
+        .setDescription(
+          `مرحبًا ${member}\n\n` +
+          `✅ تم قبولك في **${BOT_NAME}**\n\n` +
+          `📅 موعد المقابلة الصوتية:\n**${appData.appointment || 'سيتم تحديده قريبًا'}**`
+        )
+        .setImage(SERVER_LOGO)
+        .setFooter({ text: BOT_FOOTER });
+
+      await member.send({ embeds: [acceptedDM] }).catch(() => {});
 
       if (appData.email && isValidEmail(appData.email)) {
         await sendEmail(
           appData.email,
           'تم قبولك في Night City Community',
-          buildAcceptEmailHtml(member.user.username, appData.appointment || 'سيتم تحديد الموعد قريبًا.')
+          buildAcceptEmailHtml(member.user.username, appData.appointment || 'سيتم تحديده قريبًا')
         );
       }
 
-      setApplicationData(applicantId, {
-        status: 'accepted'
-      });
+      setApplicationData(applicantId, { status: 'accepted' });
 
-      const acceptedEmbed = buildAcceptedEmbed(
-        applicantId,
-        interaction.user.tag,
-        appData.appointment || 'سيتم تحديده قريبًا'
-      );
+      const acceptedReview = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle('✅ تم قبول التقديم')
+        .setDescription(
+          `👤 **المتقدم:** <@${applicantId}>\n` +
+          `🛡️ **تم بواسطة:** ${interaction.user.tag}\n` +
+          `📅 **موعد المقابلة الصوتية:** ${appData.appointment || 'غير محدد'}`
+        )
+        .setThumbnail(SERVER_LOGO)
+        .setFooter({ text: BOT_FOOTER });
 
       await interaction.editReply({
-        embeds: [acceptedEmbed],
+        embeds: [acceptedReview],
         components: buildFinalApplicationActionRow(true)
       });
 
-      await sendLog(`✅ تم قبول تقديم ${member.user.tag} بواسطة ${interaction.user.tag}`);
+      await sendLog(`✅ تم قبول ${member.user.tag} بواسطة ${interaction.user.tag}`);
       return;
     }
 
-    /* ===== رفض التقديم ===== */
+    /* ===== Reject ===== */
     if (interaction.isButton() && interaction.customId.startsWith('reject_application_')) {
       if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: '❌ هذا الزر للإدارة فقط.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ هذا الزر للإدارة فقط.', ephemeral: true });
       }
 
       if (!isButtonEnabled('reject_application')) {
-        return interaction.reply({
-          content: '❌ زر الرفض متوقف حالياً.',
-          ephemeral: true
-        });
+        return interaction.reply({ content: '❌ زر الرفض متوقف حالياً.', ephemeral: true });
       }
 
       const applicantId = interaction.customId.replace('reject_application_', '');
@@ -1891,32 +1516,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(true);
 
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(reasonInput)
-      );
-
+      modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
       return interaction.showModal(modal);
     }
 
-    /* ===== مودال سبب رفض التقديم ===== */
     if (interaction.isModalSubmit() && interaction.customId.startsWith('reject_application_reason_')) {
-      if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: '❌ هذا الإجراء للإدارة فقط.',
-          ephemeral: true
-        });
-      }
-
       const applicantId = interaction.customId.replace('reject_application_reason_', '');
       const reason = interaction.fields.getTextInputValue('reject_reason').trim();
       const appData = getApplicationData(applicantId) || {};
 
       const user = await client.users.fetch(applicantId).catch(() => null);
       if (user) {
-        await user.send(
-          `❌ **تم رفض طلبك للإدارة**\n\n` +
-          `السبب:\n${reason}`
-        ).catch(() => {});
+        const rejectedDM = new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle('❌ تم رفض طلبك')
+          .setDescription(`📄 سبب الرفض:\n${reason}`)
+          .setImage(SERVER_LOGO)
+          .setFooter({ text: BOT_FOOTER });
+
+        await user.send({ embeds: [rejectedDM] }).catch(() => {});
       }
 
       if (appData.email && isValidEmail(appData.email)) {
@@ -1927,22 +1545,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
         );
       }
 
-      setApplicationData(applicantId, {
-        status: 'rejected'
-      });
+      setApplicationData(applicantId, { status: 'rejected' });
 
-      const rejectedEmbed = buildRejectedEmbed(
-        applicantId,
-        interaction.user.tag,
-        reason
-      );
+      const rejectedReview = new EmbedBuilder()
+        .setColor(0xED4245)
+        .setTitle('❌ تم رفض التقديم')
+        .setDescription(
+          `👤 **المتقدم:** <@${applicantId}>\n` +
+          `🛡️ **تم بواسطة:** ${interaction.user.tag}\n` +
+          `📄 **سبب الرفض:** ${reason}`
+        )
+        .setThumbnail(SERVER_LOGO)
+        .setFooter({ text: BOT_FOOTER });
 
       await interaction.update({
-        embeds: [rejectedEmbed],
+        embeds: [rejectedReview],
         components: buildFinalApplicationActionRow(false)
       });
 
-      await sendLog(`❌ تم رفض تقديم ${applicantId} بواسطة ${interaction.user.tag}\nالسبب: ${reason}`);
+      await sendLog(`❌ تم رفض ${applicantId} بواسطة ${interaction.user.tag} | السبب: ${reason}`);
       return;
     }
   } catch (error) {
