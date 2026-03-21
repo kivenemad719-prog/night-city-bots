@@ -1388,7 +1388,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const ticketId = parts[1];
 
       if (hasRatedTicket(ticketId, interaction.user.id)) {
-        return interaction.reply({ content: '❌ قيّمت هذه التذكرة من قبل.', ephemeral: true });
+        return interaction.reply({ content: '❌ لقد قمت بتقييم هذه التذكرة من قبل.', ephemeral: true });
       }
 
       const stars = parts[2];
