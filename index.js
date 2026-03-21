@@ -29,9 +29,14 @@ const nodemailer = require('nodemailer');
 
 const GUILD_ID = '1482955089391124583';
 
+const OWNER_ROLE_ID = 'PUT_OWNER_ROLE_ID';
+const CO_OWNER_ROLE_ID = 'PUT_CO_OWNER_ROLE_ID';
+const HIGH_ADMIN_ROLE_ID = 'PUT_HIGH_ADMIN_ROLE_ID';
 const ADMIN_ROLE_ID = '1484040156318138390';
+
 const SUPPORT_ROLE_ID = '1484040249788207175';
 const PLAYER_ROLE_ID = '1484231061524189225';
+const ACCEPTED_EXAM_ROLE_ID = 'PUT_ACCEPTED_EXAM_ROLE_ID';
 
 const WELCOME_CHANNEL_ID = '1484024608486326312';
 const RULES_CHANNEL_ID = '1484026706053431316';
@@ -40,23 +45,14 @@ const DECISION_CHANNEL_ID = '1484041156428955738';
 const LOG_CHANNEL_ID = '1484041450478895184';
 const REVIEW_CHANNEL_ID = '1484303917998276648';
 const APPLICATION_REVIEW_CHANNEL_ID = '1484304595730829352';
+const DASHBOARD_CHANNEL_ID = '1484733414690001156';
+const VOICE_INTERVIEW_CHANNEL_ID = '1484733888294158478';
 
 const CATEGORY_SUPPORT_ID = '1484041614320996413';
 const CATEGORY_REPORTS_ID = '1484041819330183279';
 const CATEGORY_QUESTIONS_ID = '1484042095306997830';
 const CATEGORY_SUGGESTIONS_ID = '1484042283673190491';
 const CATEGORY_PARTNERSHIP_ID = '1484042422626422845';
-
-/* =========================
-   Roles on accept
-========================= */
-
-const APPROVED_ADMIN_ROLE_IDS = [
-  '1484244769566752819',
-  '1484244554176663572',
-  '1484040156318138390',
-  '1484040249788207175'
-];
 
 /* =========================
    Settings
@@ -80,37 +76,29 @@ const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
   secure: false,
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS
-  },
+auth: {
+  user: "nightcity12600@gmail.com",
+  pass: "bpghzntsoujdptwo"
+}
   connectionTimeout: 15000,
   greetingTimeout: 15000,
   socketTimeout: 20000
 });
 
 transporter.verify((err) => {
-  if (err) {
-    console.log('❌ Email Error:', err.message);
-  } else {
-    console.log('✅ Email Ready');
-  }
+  if (err) console.log('❌ Email Error:', err.message);
+  else console.log('✅ Email Ready');
 });
 
 async function sendEmail(to, subject, html) {
   try {
-    if (!to || !EMAIL_USER || !EMAIL_PASS) {
-      console.log('❌ Email skipped: missing email config or recipient');
-      return false;
-    }
-
+    if (!to || !EMAIL_USER || !EMAIL_PASS) return false;
     await transporter.sendMail({
       from: `"${BOT_NAME}" <${EMAIL_USER}>`,
       to,
       subject,
       html
     });
-
     console.log(`✅ Email sent to ${to}`);
     return true;
   } catch (err) {
@@ -129,9 +117,11 @@ function defaultData() {
   return {
     ticketCounter: 1,
     applications: {},
+    ratings: {},
     system: {
       tickets: true,
       applications: true,
+      voice_open: true,
       buttons: {
         ticket_support: true,
         ticket_report: true,
@@ -142,7 +132,8 @@ function defaultData() {
         accept_application: true,
         reject_application: true,
         set_appointment: true,
-        renew_appointment: true
+        renew_appointment: true,
+        join_voice: true
       }
     }
   };
@@ -159,6 +150,7 @@ function loadData() {
       ...base,
       ...parsed,
       applications: parsed.applications || {},
+      ratings: parsed.ratings || {},
       ticketCounter: parsed.ticketCounter || 1,
       system: {
         ...base.system,
@@ -262,16 +254,25 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function isAdmin(member) {
-  return member?.roles?.cache?.has(ADMIN_ROLE_ID);
+function hasRole(member, roleId) {
+  return member?.roles?.cache?.has(roleId);
+}
+
+function isManagement(member) {
+  return (
+    hasRole(member, OWNER_ROLE_ID) ||
+    hasRole(member, CO_OWNER_ROLE_ID) ||
+    hasRole(member, HIGH_ADMIN_ROLE_ID) ||
+    hasRole(member, ADMIN_ROLE_ID)
+  );
 }
 
 function isSupport(member) {
-  return member?.roles?.cache?.has(SUPPORT_ROLE_ID);
+  return hasRole(member, SUPPORT_ROLE_ID);
 }
 
 function isStaff(member) {
-  return isAdmin(member) || isSupport(member);
+  return isManagement(member) || isSupport(member);
 }
 
 function isButtonEnabled(key) {
@@ -293,6 +294,16 @@ function setApplicationData(userId, payload) {
 
 function getApplicationData(userId) {
   return dataStore.applications?.[userId] || null;
+}
+
+function hasRatedTicket(ticketId, userId) {
+  return Boolean(dataStore.ratings?.[ticketId]?.[userId]);
+}
+
+function setTicketRating(ticketId, userId, payload) {
+  if (!dataStore.ratings[ticketId]) dataStore.ratings[ticketId] = {};
+  dataStore.ratings[ticketId][userId] = payload;
+  saveData(dataStore);
 }
 
 async function fetchChannel(channelId) {
@@ -335,6 +346,10 @@ async function createTranscript(channel) {
   }
 
   return Buffer.from(content, 'utf-8');
+}
+
+function getVoiceStatusText() {
+  return dataStore.system.voice_open ? '🟢 مفتوحة' : '🔴 مقفولة';
 }
 
 /* =========================
@@ -466,7 +481,7 @@ function buildTicketsPanelRows() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('apply_admin')
-        .setLabel('📋 تقديم للإدارة')
+        .setLabel('📋 تقديم الإدارة')
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(!b.apply_admin)
     )
@@ -495,10 +510,11 @@ function buildDashboardEmbed() {
 
   return new EmbedBuilder()
     .setColor(0x5865F2)
-    .setTitle('⚙️ لوحة التحكم')
+    .setTitle('🎛️ لوحة التحكم')
     .setDescription(
       `🎫 التذاكر العامة: ${dataStore.system.tickets ? '🟢 شغال' : '🔴 متوقف'}\n` +
-      `📋 التقديمات العامة: ${dataStore.system.applications ? '🟢 شغال' : '🔴 متوقف'}\n\n` +
+      `📋 التقديمات العامة: ${dataStore.system.applications ? '🟢 شغال' : '🔴 متوقف'}\n` +
+      `🎤 المقابلة الصوتية: ${getVoiceStatusText()}\n\n` +
       `**أزرار التذاكر**\n` +
       `🎫 دعم: ${b.ticket_support ? '🟢' : '🔴'}\n` +
       `🚨 إبلاغ: ${b.ticket_report ? '🟢' : '🔴'}\n` +
@@ -506,11 +522,12 @@ function buildDashboardEmbed() {
       `💡 اقتراح: ${b.ticket_suggestion ? '🟢' : '🔴'}\n` +
       `🤝 شراكة: ${b.ticket_partnership ? '🟢' : '🔴'}\n` +
       `📋 تقديم إدارة: ${b.apply_admin ? '🟢' : '🔴'}\n\n` +
-      `**أزرار التقديمات**\n` +
+      `**أزرار مراجعة التقديمات**\n` +
       `✅ قبول: ${b.accept_application ? '🟢' : '🔴'}\n` +
       `❌ رفض: ${b.reject_application ? '🟢' : '🔴'}\n` +
       `📅 تحديد موعد: ${b.set_appointment ? '🟢' : '🔴'}\n` +
-      `🔄 تجديد موعد: ${b.renew_appointment ? '🟢' : '🔴'}`
+      `🔄 تجديد موعد: ${b.renew_appointment ? '🟢' : '🔴'}\n` +
+      `🎤 دخول المقابلة: ${b.join_voice ? '🟢' : '🔴'}`
     )
     .setFooter({ text: BOT_FOOTER });
 }
@@ -519,7 +536,8 @@ function buildDashboardButtons() {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('toggle_tickets').setLabel('التذاكر العامة').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('toggle_apps').setLabel('التقديمات العامة').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('toggle_apps').setLabel('التقديمات العامة').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('toggle_voice').setLabel('المقابلة الصوتية').setStyle(ButtonStyle.Primary)
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('toggle_ticket_support').setLabel('دعم').setStyle(ButtonStyle.Primary),
@@ -529,13 +547,14 @@ function buildDashboardButtons() {
       new ButtonBuilder().setCustomId('toggle_ticket_partnership').setLabel('شراكة').setStyle(ButtonStyle.Primary)
     ),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('toggle_apply_admin').setLabel('تقديم').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('toggle_accept_application').setLabel('قبول').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('toggle_reject_application').setLabel('رفض').setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('toggle_apply_admin').setLabel('زر التقديم').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('toggle_accept_application').setLabel('زر قبول').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('toggle_reject_application').setLabel('زر رفض').setStyle(ButtonStyle.Danger)
     ),
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('toggle_set_appointment').setLabel('تحديد موعد').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('toggle_renew_appointment').setLabel('تجديد موعد').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('toggle_set_appointment').setLabel('زر تحديد موعد').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('toggle_renew_appointment').setLabel('زر تجديد').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('toggle_join_voice').setLabel('زر دخول المقابلة').setStyle(ButtonStyle.Primary)
     )
   ];
 }
@@ -562,7 +581,7 @@ function buildTicketButtons() {
   ];
 }
 
-function buildApplicationActionRow(applicantId) {
+function buildApplicationActionRow(applicantId, processed = false) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -570,56 +589,37 @@ function buildApplicationActionRow(applicantId) {
         .setLabel('قبول')
         .setEmoji('✅')
         .setStyle(ButtonStyle.Success)
-        .setDisabled(!isButtonEnabled('accept_application')),
+        .setDisabled(processed || !isButtonEnabled('accept_application')),
       new ButtonBuilder()
         .setCustomId(`reject_application_${applicantId}`)
         .setLabel('رفض')
         .setEmoji('❌')
         .setStyle(ButtonStyle.Danger)
-        .setDisabled(!isButtonEnabled('reject_application')),
+        .setDisabled(processed || !isButtonEnabled('reject_application')),
       new ButtonBuilder()
         .setCustomId(`set_appointment_${applicantId}`)
         .setLabel('تحديد موعد')
         .setEmoji('📅')
         .setStyle(ButtonStyle.Primary)
-        .setDisabled(!isButtonEnabled('set_appointment')),
+        .setDisabled(processed || !isButtonEnabled('set_appointment')),
       new ButtonBuilder()
         .setCustomId(`renew_appointment_${applicantId}`)
         .setLabel('تجديد الموعد')
         .setEmoji('🔄')
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!isButtonEnabled('renew_appointment'))
+        .setDisabled(processed || !isButtonEnabled('renew_appointment'))
     )
   ];
 }
 
-function buildFinalApplicationActionRow(accepted = false) {
+function buildAcceptedDmRow(applicantId) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId('application_done_accept')
-        .setLabel(accepted ? 'تم القبول' : 'قبول')
-        .setEmoji('✅')
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(true),
-      new ButtonBuilder()
-        .setCustomId('application_done_reject')
-        .setLabel(accepted ? 'رفض' : 'تم الرفض')
-        .setEmoji('❌')
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(true),
-      new ButtonBuilder()
-        .setCustomId('application_done_time')
-        .setLabel('تحديد موعد')
-        .setEmoji('📅')
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(true),
-      new ButtonBuilder()
-        .setCustomId('application_done_renew')
-        .setLabel('تجديد الموعد')
-        .setEmoji('🔄')
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(true)
+        .setCustomId(`join_voice_${applicantId}`)
+        .setLabel(dataStore.system.voice_open ? '🎤 دخول المقابلة الصوتية' : '🔒 المقابلة مقفولة')
+        .setStyle(dataStore.system.voice_open ? ButtonStyle.Primary : ButtonStyle.Secondary)
+        .setDisabled(!dataStore.system.voice_open || !isButtonEnabled('join_voice'))
     )
   ];
 }
@@ -714,6 +714,69 @@ async function sendDecisionPanel() {
   }).catch(() => {});
 }
 
+async function sendDashboardPanel() {
+  const dashboardChannel = await fetchChannel(DASHBOARD_CHANNEL_ID);
+  if (!dashboardChannel) return;
+  const exists = await panelExists(dashboardChannel, '🎛️ لوحة التحكم');
+  if (exists) return;
+
+  await dashboardChannel.send({
+    embeds: [buildDashboardEmbed()],
+    components: buildDashboardButtons()
+  }).catch(() => {});
+}
+
+async function refreshDashboardPanel() {
+  const dashboardChannel = await fetchChannel(DASHBOARD_CHANNEL_ID);
+  if (!dashboardChannel) return;
+
+  try {
+    const messages = await dashboardChannel.messages.fetch({ limit: 50 });
+    const panelMessage = messages.find(
+      (m) =>
+        m.author.id === client.user.id &&
+        m.embeds.length > 0 &&
+        m.embeds[0].title === '🎛️ لوحة التحكم'
+    );
+
+    if (panelMessage) {
+      await panelMessage.edit({
+        embeds: [buildDashboardEmbed()],
+        components: buildDashboardButtons()
+      });
+    }
+  } catch {
+    console.log('❌ Failed to refresh dashboard panel');
+  }
+}
+
+async function refreshAcceptedVoiceButtons() {
+  for (const [userId, appData] of Object.entries(dataStore.applications || {})) {
+    if (appData.status !== 'accepted') continue;
+    if (!appData.accept_dm_channel_id || !appData.accept_dm_message_id) continue;
+
+    try {
+      const dmChannel = await client.channels.fetch(appData.accept_dm_channel_id);
+      if (!dmChannel) continue;
+      const msg = await dmChannel.messages.fetch(appData.accept_dm_message_id);
+      if (!msg) continue;
+
+      const updatedEmbed = EmbedBuilder.from(msg.embeds[0]);
+      const currentDesc = updatedEmbed.data.description || '';
+      const nextDesc = currentDesc.replace(
+        /🎤 حالة المقابلة الصوتية:[\s\S]*?(?:\n|$)/,
+        `🎤 حالة المقابلة الصوتية: **${getVoiceStatusText()}**\n`
+      );
+      updatedEmbed.setDescription(nextDesc);
+
+      await msg.edit({
+        embeds: [updatedEmbed],
+        components: buildAcceptedDmRow(userId)
+      });
+    } catch {}
+  }
+}
+
 /* =========================
    Slash Commands
 ========================= */
@@ -741,8 +804,8 @@ async function registerSlashCommands() {
       .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator),
 
     new SlashCommandBuilder()
-      .setName('dashboard')
-      .setDescription('لوحة التحكم')
+      .setName('panel-dashboard')
+      .setDescription('إرسال لوحة التحكم')
       .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator)
   ].map((cmd) => cmd.toJSON());
 
@@ -879,7 +942,10 @@ async function startAdminApplication(interaction) {
       special: answers.special,
       server_rules: answers.server_rules,
       activity_days: answers.activity_days,
-      status: 'pending'
+      status: 'pending',
+      review_message_id: null,
+      accept_dm_channel_id: null,
+      accept_dm_message_id: null
     });
 
     const reviewEmbed = new EmbedBuilder()
@@ -898,14 +964,17 @@ async function startAdminApplication(interaction) {
         { name: 'ما الذي يميزه', value: answers.special || 'غير موجود' },
         { name: 'فهم القوانين', value: answers.server_rules || 'غير موجود' },
         { name: 'أيام النشاط', value: answers.activity_days || 'غير موجود' },
-        { name: 'موعد المقابلة الصوتية', value: 'لم يتم تحديده بعد' }
+        { name: 'موعد المقابلة الصوتية', value: 'لم يتم تحديده بعد' },
+        { name: 'حالة الطلب', value: '⏳ قيد المراجعة' }
       )
       .setFooter({ text: BOT_FOOTER });
 
-    await reviewChannel.send({
+    const sent = await reviewChannel.send({
       embeds: [reviewEmbed],
-      components: buildApplicationActionRow(user.id)
+      components: buildApplicationActionRow(user.id, false)
     });
+
+    setApplicationData(user.id, { review_message_id: sent.id });
 
     await dm.send('✅ تم إرسال تقديمك إلى الإدارة بنجاح.');
     await sendLog(`📋 تم إرسال تقديم إدارة جديد بواسطة ${user.tag}`);
@@ -924,6 +993,7 @@ client.once(Events.ClientReady, async () => {
   await sendWelcomePanel();
   await sendTicketsPanel();
   await sendDecisionPanel();
+  await sendDashboardPanel();
   await sendLog('✅ تم تشغيل البوت.');
 });
 
@@ -965,7 +1035,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     /* ===== Slash ===== */
     if (interaction.isChatInputCommand()) {
-      if (!isAdmin(interaction.member)) {
+      if (!isManagement(interaction.member)) {
         return interaction.reply({ content: '❌ هذا الأمر للإدارة فقط.', ephemeral: true });
       }
 
@@ -973,6 +1043,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await sendWelcomePanel();
         await sendTicketsPanel();
         await sendDecisionPanel();
+        await sendDashboardPanel();
         return interaction.reply({ content: '✅ تم إرسال كل اللوحات.', ephemeral: true });
       }
 
@@ -991,12 +1062,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return interaction.reply({ content: '✅ تم إرسال لوحة القرارات.', ephemeral: true });
       }
 
-      if (interaction.commandName === 'dashboard') {
-        return interaction.reply({
-          embeds: [buildDashboardEmbed()],
-          components: buildDashboardButtons(),
-          ephemeral: true
-        });
+      if (interaction.commandName === 'panel-dashboard') {
+        await sendDashboardPanel();
+        return interaction.reply({ content: '✅ تم إرسال لوحة التحكم.', ephemeral: true });
       }
     }
 
@@ -1011,29 +1079,43 @@ client.on(Events.InteractionCreate, async (interaction) => {
       toggle_accept_application: 'accept_application',
       toggle_reject_application: 'reject_application',
       toggle_set_appointment: 'set_appointment',
-      toggle_renew_appointment: 'renew_appointment'
+      toggle_renew_appointment: 'renew_appointment',
+      toggle_join_voice: 'join_voice'
     };
 
     if (interaction.isButton() && interaction.customId === 'toggle_tickets') {
-      if (!isAdmin(interaction.member)) return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
+      if (!isManagement(interaction.member)) return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
       dataStore.system.tickets = !dataStore.system.tickets;
       saveData(dataStore);
       await refreshTicketsPanel();
+      await refreshDashboardPanel();
       return interaction.update({ embeds: [buildDashboardEmbed()], components: buildDashboardButtons() });
     }
 
     if (interaction.isButton() && interaction.customId === 'toggle_apps') {
-      if (!isAdmin(interaction.member)) return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
+      if (!isManagement(interaction.member)) return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
       dataStore.system.applications = !dataStore.system.applications;
       saveData(dataStore);
       await refreshTicketsPanel();
+      await refreshDashboardPanel();
+      return interaction.update({ embeds: [buildDashboardEmbed()], components: buildDashboardButtons() });
+    }
+
+    if (interaction.isButton() && interaction.customId === 'toggle_voice') {
+      if (!isManagement(interaction.member)) return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
+      dataStore.system.voice_open = !dataStore.system.voice_open;
+      saveData(dataStore);
+      await refreshDashboardPanel();
+      await refreshAcceptedVoiceButtons();
       return interaction.update({ embeds: [buildDashboardEmbed()], components: buildDashboardButtons() });
     }
 
     if (interaction.isButton() && dashboardMap[interaction.customId]) {
-      if (!isAdmin(interaction.member)) return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
+      if (!isManagement(interaction.member)) return interaction.reply({ content: '❌ للإدارة فقط.', ephemeral: true });
       toggleButtonSetting(dashboardMap[interaction.customId]);
       await refreshTicketsPanel();
+      await refreshDashboardPanel();
+      await refreshAcceptedVoiceButtons();
       return interaction.update({ embeds: [buildDashboardEmbed()], components: buildDashboardButtons() });
     }
 
@@ -1043,6 +1125,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return interaction.reply({ content: '❌ التقديمات متوقفة حالياً.', ephemeral: true });
       }
       return startAdminApplication(interaction);
+    }
+
+    /* ===== Join voice ===== */
+    if (interaction.isButton() && interaction.customId.startsWith('join_voice_')) {
+      const applicantId = interaction.customId.replace('join_voice_', '');
+      if (interaction.user.id !== applicantId) {
+        return interaction.reply({ content: '❌ هذا الزر ليس لك.', ephemeral: true });
+      }
+
+      if (!isButtonEnabled('join_voice') || !dataStore.system.voice_open) {
+        return interaction.reply({ content: '❌ المقابلة الصوتية مقفولة حالياً.', ephemeral: true });
+      }
+
+      return interaction.reply({
+        content: `🎤 ادخل هنا:\nhttps://discord.com/channels/${GUILD_ID}/${VOICE_INTERVIEW_CHANNEL_ID}`,
+        ephemeral: true
+      });
     }
 
     /* ===== Open ticket ===== */
@@ -1118,6 +1217,33 @@ client.on(Events.InteractionCreate, async (interaction) => {
               PermissionsBitField.Flags.ViewChannel,
               PermissionsBitField.Flags.SendMessages,
               PermissionsBitField.Flags.ReadMessageHistory
+            ]
+          },
+          {
+            id: OWNER_ROLE_ID,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.ManageChannels
+            ]
+          },
+          {
+            id: CO_OWNER_ROLE_ID,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.ManageChannels
+            ]
+          },
+          {
+            id: HIGH_ADMIN_ROLE_ID,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.ManageChannels
             ]
           }
         ]
@@ -1260,6 +1386,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton() && interaction.customId.startsWith('rate_')) {
       const parts = interaction.customId.split('_');
       const ticketId = parts[1];
+
+      if (hasRatedTicket(ticketId, interaction.user.id)) {
+        return interaction.reply({ content: '❌ قيّمت هذه التذكرة من قبل.', ephemeral: true });
+      }
+
       const stars = parts[2];
 
       const modal = new ModalBuilder()
@@ -1285,6 +1416,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const stars = parts[3];
       const reason = interaction.fields.getTextInputValue('reason').trim();
 
+      if (hasRatedTicket(ticketId, interaction.user.id)) {
+        return interaction.reply({ content: '❌ قيّمت هذه التذكرة من قبل.', ephemeral: true });
+      }
+
+      setTicketRating(ticketId, interaction.user.id, {
+        stars,
+        reason,
+        username: interaction.user.tag,
+        createdAt: Date.now()
+      });
+
       const reviewChannel = await fetchChannel(REVIEW_CHANNEL_ID);
       if (reviewChannel) {
         const reviewEmbed = new EmbedBuilder()
@@ -1306,7 +1448,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     /* ===== Decisions ===== */
     if (interaction.isButton() && interaction.customId === 'open_decision_modal') {
-      if (!isAdmin(interaction.member)) {
+      if (!isManagement(interaction.member)) {
         return interaction.reply({ content: '❌ هذا الزر خاص بالإدارة فقط.', ephemeral: true });
       }
 
@@ -1325,7 +1467,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId === 'decision_modal') {
-      if (!isAdmin(interaction.member)) {
+      if (!isManagement(interaction.member)) {
         return interaction.reply({ content: '❌ هذا الإجراء خاص بالإدارة فقط.', ephemeral: true });
       }
 
@@ -1367,13 +1509,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         interaction.customId.startsWith('renew_appointment_')
       )
     ) {
-      if (!isStaff(interaction.member)) {
+      if (!isManagement(interaction.member)) {
         return interaction.reply({ content: '❌ هذا الزر للإدارة فقط.', ephemeral: true });
       }
 
       const applicantId = interaction.customId
         .replace('set_appointment_', '')
         .replace('renew_appointment_', '');
+
+      const appData = getApplicationData(applicantId) || {};
+      if (appData.status && appData.status !== 'pending' && appData.status !== 'accepted') {
+        return interaction.reply({ content: '❌ تم التعامل مع الطلب بالفعل.', ephemeral: true });
+      }
 
       const renew = interaction.customId.startsWith('renew_appointment_');
 
@@ -1418,14 +1565,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       setApplicationData(applicantId, { appointment: appointmentValue });
 
       const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0]);
-      const fields = (updatedEmbed.data.fields || []).filter(
-        (f) => f.name !== 'موعد المقابلة الصوتية'
-      );
+      const oldFields = updatedEmbed.data.fields || [];
+      const fields = oldFields.filter((f) => f.name !== 'موعد المقابلة الصوتية');
       updatedEmbed.setFields([...fields, { name: 'موعد المقابلة الصوتية', value: appointmentValue }]);
 
       await interaction.message.edit({
         embeds: [updatedEmbed],
-        components: buildApplicationActionRow(applicantId)
+        components: buildApplicationActionRow(applicantId, oldData.status !== 'pending')
       });
 
       const user = await client.users.fetch(applicantId).catch(() => null);
@@ -1433,6 +1579,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await user.send(
           `📅 **تم تحديث موعد المقابلة الصوتية**\n\n${appointmentValue}`
         ).catch(() => {});
+
+        if (oldData.accept_dm_channel_id && oldData.accept_dm_message_id) {
+          try {
+            const dmChannel = await client.channels.fetch(oldData.accept_dm_channel_id);
+            const dmMsg = await dmChannel.messages.fetch(oldData.accept_dm_message_id);
+            const dmEmbed = EmbedBuilder.from(dmMsg.embeds[0]);
+            const desc = `مرحبًا <@${applicantId}>\n\n✅ تم قبولك في **${BOT_NAME}**\n📅 موعد المقابلة الصوتية:\n**${appointmentValue}**\n🎤 حالة المقابلة الصوتية: **${getVoiceStatusText()}**`;
+            dmEmbed.setDescription(desc);
+
+            await dmMsg.edit({
+              embeds: [dmEmbed],
+              components: buildAcceptedDmRow(applicantId)
+            });
+          } catch {}
+        }
       }
 
       if (oldData.email && isValidEmail(oldData.email)) {
@@ -1449,7 +1610,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     /* ===== Accept ===== */
     if (interaction.isButton() && interaction.customId.startsWith('accept_application_')) {
-      if (!isStaff(interaction.member)) {
+      if (!isManagement(interaction.member)) {
         return interaction.reply({ content: '❌ هذا الزر للإدارة فقط.', ephemeral: true });
       }
 
@@ -1467,6 +1628,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       const appData = getApplicationData(applicantId) || {};
+      if (appData.status && appData.status !== 'pending') {
+        return interaction.followUp({ content: '❌ تم التعامل مع الطلب بالفعل.', ephemeral: true });
+      }
 
       const processingEmbed = new EmbedBuilder()
         .setColor(0xFEE75C)
@@ -1476,25 +1640,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.message.edit({
         embeds: [processingEmbed],
-        components: buildFinalApplicationActionRow(true)
+        components: buildApplicationActionRow(applicantId, true)
       }).catch(() => {});
 
-      for (const roleId of APPROVED_ADMIN_ROLE_IDS) {
-        await member.roles.add(roleId).catch(() => {});
+      if (ACCEPTED_EXAM_ROLE_ID && ACCEPTED_EXAM_ROLE_ID !== 'PUT_ACCEPTED_EXAM_ROLE_ID') {
+        await member.roles.add(ACCEPTED_EXAM_ROLE_ID).catch(() => {});
       }
 
       const acceptedDM = new EmbedBuilder()
         .setColor(0x57F287)
-        .setTitle('🎉 تم قبولك في الإدارة')
+        .setTitle('🎉 تم قبولك في الاختبار الإلكتروني')
         .setDescription(
-          `مرحبًا ${member}\n\n` +
-          `✅ تم قبولك في **${BOT_NAME}**\n\n` +
-          `📅 موعد المقابلة الصوتية:\n**${appData.appointment || 'سيتم تحديده قريبًا'}**`
+          `مرحبًا <@${applicantId}>\n\n` +
+          `✅ تم قبولك في **${BOT_NAME}**\n` +
+          `📅 موعد المقابلة الصوتية:\n**${appData.appointment || 'سيتم تحديده قريبًا'}**\n` +
+          `🎤 حالة المقابلة الصوتية: **${getVoiceStatusText()}**`
         )
         .setImage(SERVER_LOGO)
         .setFooter({ text: BOT_FOOTER });
 
-      await member.send({ embeds: [acceptedDM] }).catch(() => {});
+      let dmMessage = null;
+      try {
+        dmMessage = await member.send({
+          embeds: [acceptedDM],
+          components: buildAcceptedDmRow(applicantId)
+        });
+      } catch {}
 
       if (appData.email && isValidEmail(appData.email)) {
         await sendEmail(
@@ -1504,7 +1675,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         );
       }
 
-      setApplicationData(applicantId, { status: 'accepted' });
+      setApplicationData(applicantId, {
+        status: 'accepted',
+        accept_dm_channel_id: dmMessage?.channel?.id || null,
+        accept_dm_message_id: dmMessage?.id || null
+      });
 
       const acceptedReview = new EmbedBuilder()
         .setColor(0x57F287)
@@ -1512,14 +1687,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setDescription(
           `👤 **المتقدم:** <@${applicantId}>\n` +
           `🛡️ **تم بواسطة:** ${interaction.user.tag}\n` +
-          `📅 **موعد المقابلة الصوتية:** ${appData.appointment || 'غير محدد'}`
+          `📅 **موعد المقابلة الصوتية:** ${appData.appointment || 'غير محدد'}\n` +
+          `🎤 **المقابلة الصوتية:** ${getVoiceStatusText()}\n` +
+          `🏷️ **الرول المضاف:** <@&${ACCEPTED_EXAM_ROLE_ID}>`
         )
         .setThumbnail(SERVER_LOGO)
         .setFooter({ text: BOT_FOOTER });
 
       await interaction.message.edit({
         embeds: [acceptedReview],
-        components: buildFinalApplicationActionRow(true)
+        components: buildApplicationActionRow(applicantId, true)
       });
 
       await sendLog(`✅ تم قبول ${member.user.tag} بواسطة ${interaction.user.tag}`);
@@ -1528,7 +1705,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     /* ===== Reject ===== */
     if (interaction.isButton() && interaction.customId.startsWith('reject_application_')) {
-      if (!isStaff(interaction.member)) {
+      if (!isManagement(interaction.member)) {
         return interaction.reply({ content: '❌ هذا الزر للإدارة فقط.', ephemeral: true });
       }
 
@@ -1537,6 +1714,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       const applicantId = interaction.customId.replace('reject_application_', '');
+      const appData = getApplicationData(applicantId) || {};
+      if (appData.status && appData.status !== 'pending') {
+        return interaction.reply({ content: '❌ تم التعامل مع الطلب بالفعل.', ephemeral: true });
+      }
 
       const modal = new ModalBuilder()
         .setCustomId(`reject_application_reason_${applicantId}`)
@@ -1559,6 +1740,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const reason = interaction.fields.getTextInputValue('reject_reason').trim();
       const appData = getApplicationData(applicantId) || {};
 
+      if (appData.status && appData.status !== 'pending') {
+        return;
+      }
+
       const processingEmbed = new EmbedBuilder()
         .setColor(0xFEE75C)
         .setTitle('⏳ جاري رفض التقديم...')
@@ -1567,7 +1752,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.message.edit({
         embeds: [processingEmbed],
-        components: buildFinalApplicationActionRow(false)
+        components: buildApplicationActionRow(applicantId, true)
       }).catch(() => {});
 
       const user = await client.users.fetch(applicantId).catch(() => null);
@@ -1605,7 +1790,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.message.edit({
         embeds: [rejectedReview],
-        components: buildFinalApplicationActionRow(false)
+        components: buildApplicationActionRow(applicantId, true)
       });
 
       await sendLog(`❌ تم رفض ${applicantId} بواسطة ${interaction.user.tag} | السبب: ${reason}`);
