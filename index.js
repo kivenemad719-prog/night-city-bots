@@ -29,14 +29,14 @@ const nodemailer = require('nodemailer');
 
 const GUILD_ID = '1482955089391124583';
 
-const OWNER_ROLE_ID = 'PUT_OWNER_ROLE_ID';
-const CO_OWNER_ROLE_ID = 'PUT_CO_OWNER_ROLE_ID';
-const HIGH_ADMIN_ROLE_ID = 'PUT_HIGH_ADMIN_ROLE_ID';
-const ADMIN_ROLE_ID = '1484040156318138390';
+const OWNER_ROLE_ID = '1484244769566752819';
+const CO_OWNER_ROLE_ID = '1484244554176663572';
+const HIGH_ADMIN_ROLE_ID = '1484040156318138390';
+const ADMIN_ROLE_ID = '1484040249788207175';
 
 const SUPPORT_ROLE_ID = '1484040249788207175';
 const PLAYER_ROLE_ID = '1484231061524189225';
-const ACCEPTED_EXAM_ROLE_ID = 'PUT_ACCEPTED_EXAM_ROLE_ID';
+const ACCEPTED_EXAM_ROLE_ID = '1484736366007816421';
 
 const WELCOME_CHANNEL_ID = '1484024608486326312';
 const RULES_CHANNEL_ID = '1484026706053431316';
@@ -76,10 +76,10 @@ const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
   secure: false,
-auth: {
-  user: "nightcity12600@gmail.com",
-  pass: "bpghzntsoujdptwo"
-}
+  auth: {
+    user: EMAIL_USER,
+    pass: EMAIL_PASS
+  },
   connectionTimeout: 15000,
   greetingTimeout: 15000,
   socketTimeout: 20000
