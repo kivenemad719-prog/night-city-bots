@@ -79,7 +79,7 @@ const transporter = nodemailer.createTransport({
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS
-  }
+  }, // ✅ مهم جدًا
   connectionTimeout: 15000,
   greetingTimeout: 15000,
   socketTimeout: 20000
