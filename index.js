@@ -1001,6 +1001,10 @@ async function startAdminApplication(interaction) {
 
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+
+  // 👇 هنا تحط السطر
+  sendEmail('kivenenad719@gnail.', 'Test Email', '<h1>It works 🎉</h1>');
+
   await registerSlashCommands();
   await sendWelcomePanel();
   await sendTicketsPanel();
