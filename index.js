@@ -81,7 +81,7 @@ async function sendEmail(to, subject, html) {
       {
         sender: {
           name: BOT_NAME,
-          email: 'noreply@nightcity.com'
+          email: 'kivenemad719@gmail.com'
         },
         to: [{ email: to }],
         subject: subject,
@@ -986,8 +986,7 @@ async function startAdminApplication(interaction) {
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  // 👇 هنا تحط السطر
-  sendEmail('kivenenad719@gnail.', 'Test Email', '<h1>It works 🎉</h1>');
+  sendEmail('yourrealemail@gmail.com', ...)
 
   await registerSlashCommands();
   await sendWelcomePanel();
