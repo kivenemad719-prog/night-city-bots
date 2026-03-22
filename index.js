@@ -986,7 +986,11 @@ async function startAdminApplication(interaction) {
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  sendEmail('yourrealemail@gmail.com', ...)
+sendEmail(
+  'yourrealemail@gmail.com',
+  'Test Email',
+  '<h1>It works 🎉</h1>'
+);
 
   await registerSlashCommands();
   await sendWelcomePanel();
