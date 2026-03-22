@@ -62,8 +62,8 @@ const CLIENT_ID = '1484035052198428843';
 const BOT_NAME = 'Night City Community';
 const BOT_FOOTER = 'Night City Community System';
 
-const EMAIL_USER = process.env.EMAIL_USER || 'nightcity12600@gmail.com';
-const EMAIL_PASS = process.env.EMAIL_PASS || 'bpghzntsoujdptwo';
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
 const SERVER_LOGO =
   process.env.SERVER_LOGO ||
   'https://cdn.discordapp.com/attachments/1484055738753093724/1484655006836719799/53114046-5DF9-4345-94CB-EBF5A32F93C5.png?ex=69bf0439&is=69bdb2b9&hm=c931877619e683c5425ea91ec35ece369cfd7c0426844c75d992ee4ad78db69d&';
