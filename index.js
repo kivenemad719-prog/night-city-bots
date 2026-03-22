@@ -72,24 +72,36 @@ const SERVER_LOGO =
    Email
 ========================= */
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS
-  }, // ✅ مهم جدًا
-  connectionTimeout: 15000,
-  greetingTimeout: 15000,
-  socketTimeout: 20000
-});
+async function sendEmail(to, subject, html) {
+  try {
+    if (!to) return false;
 
-transporter.verify((err) => {
-  if (err) console.log('❌ Email Error:', err.message);
-  else console.log('✅ Email Ready');
-});
+    await axios.post(
+      'https://api.brevo.com/v3/smtp/email',
+      {
+        sender: {
+          name: BOT_NAME,
+          email: 'noreply@nightcity.com'
+        },
+        to: [{ email: to }],
+        subject: subject,
+        htmlContent: html
+      },
+      {
+        headers: {
+          'api-key': process.env.BREVO_API_KEY,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
+    console.log(`✅ Email sent to ${to}`);
+    return true;
+  } catch (err) {
+    console.log('❌ Email Error:', err.response?.data || err.message);
+    return false;
+  }
+}
 async function sendEmail(to, subject, html) {
   try {
     if (!to || !EMAIL_USER || !EMAIL_PASS) return false;
