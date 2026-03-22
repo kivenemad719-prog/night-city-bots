@@ -102,22 +102,6 @@ async function sendEmail(to, subject, html) {
     return false;
   }
 }
-async function sendEmail(to, subject, html) {
-  try {
-    if (!to || !EMAIL_USER || !EMAIL_PASS) return false;
-    await transporter.sendMail({
-      from: `"${BOT_NAME}" <${EMAIL_USER}>`,
-      to,
-      subject,
-      html
-    });
-    console.log(`✅ Email sent to ${to}`);
-    return true;
-  } catch (err) {
-    console.log('❌ Email Error:', err.message);
-    return false;
-  }
-}
 
 /* =========================
    Data file
