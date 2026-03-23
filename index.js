@@ -82,29 +82,22 @@ async function sendEmail(to, subject, html) {
       service: 'gmail',
       auth: {
         user: 'nightcity12600@gmail.com',
-        pass: 'pysxjqvsdowwhdjw' // بدون مسافات
+        pass: 'pysxjqvsdowwhdjw'
       }
     });
 
     await transporter.sendMail({
       from: `"Night City Community" <nightcity12600@gmail.com>`,
-      to,
-      subject,
-      html
+      to: to,
+      subject: subject,
+      html: html
     });
 
     console.log(`✅ Email sent to ${to}`);
     return true;
+
   } catch (err) {
     console.log('❌ Email Error:', err.message);
-    return false;
-  }
-}
-
-    console.log(`✅ Email sent to ${to}`);
-    return true;
-  } catch (err) {
-    console.log('❌ Email Error:', err.response?.data || err.message);
     return false;
   }
 }
