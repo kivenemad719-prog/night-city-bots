@@ -81,7 +81,7 @@ async function sendEmail(to, subject, html) {
       {
         sender: {
           name: BOT_NAME,
-          email: 'support@nightcity.com'
+          email: 'nightcity12600@gmail.com'
         },
         to: [{ email: to }],
         subject: subject,
