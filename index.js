@@ -72,27 +72,34 @@ const SERVER_LOGO =
    Email
 ========================= */
 
+const nodemailer = require('nodemailer');
+
 async function sendEmail(to, subject, html) {
   try {
     if (!to) return false;
 
-    await axios.post(
-      'https://api.brevo.com/v3/smtp/email',
-      {
-        sender: {
-          name: BOT_NAME,
-          email: 'nightcity12600@gmail.com'
-        },
-        to: [{ email: to }],
-        subject: subject,
-        htmlContent: html
-      },
-      {
-        headers: {
-          'api-key': process.env.BREVO_API_KEY,
-          'Content-Type': 'application/json'
-        }
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: 'nightcity12600@gmail.com',
+        pass: 'pysxjqvsdowwhdjw' // بدون مسافات
       }
+    });
+
+    await transporter.sendMail({
+      from: `"Night City Community" <nightcity12600@gmail.com>`,
+      to,
+      subject,
+      html
+    });
+
+    console.log(`✅ Email sent to ${to}`);
+    return true;
+  } catch (err) {
+    console.log('❌ Email Error:', err.message);
+    return false;
+  }
+}
     );
 
     console.log(`✅ Email sent to ${to}`);
