@@ -81,8 +81,8 @@ async function sendEmail(to, subject, html) {
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: 'nightcity12600@gmail.com',
-        pass: 'pysxjqvsdowwhdjw'
+        user: EMAIL_USER,
+        pass: EMAIL_PASS
       }
     });
 
