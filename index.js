@@ -100,7 +100,6 @@ async function sendEmail(to, subject, html) {
     return false;
   }
 }
-    );
 
     console.log(`✅ Email sent to ${to}`);
     return true;
