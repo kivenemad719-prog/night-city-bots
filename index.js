@@ -990,6 +990,9 @@ client.once(Events.ClientReady, async () => {
   await sendTicketsPanel();
   await sendDecisionPanel();
   await sendDashboardPanel();
+
+  await testEmail(); // 👈 ده اللي ضفناه
+
   await sendLog('✅ تم تشغيل البوت.');
 });
 
